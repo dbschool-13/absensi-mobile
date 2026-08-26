@@ -523,7 +523,7 @@ export default function Dashboard() {
             <div className="px-6 py-4 flex justify-between items-center mb-2 border-b border-gray-50">
               <div>
                 <h3 className="text-lg font-black text-gray-800 tracking-tight">
-                  Konfirmasi {modalType === "datang" ? "Masuk" : "Keluar"}
+                  Konfirmasi {modalType === "datang" ? "Masuk" : "Pulang"}
                 </h3>
                 <p className="text-xs text-gray-400 font-semibold mt-0.5">
                   Pastikan lokasi Anda sudah akurat.

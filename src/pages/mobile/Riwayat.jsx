@@ -202,7 +202,7 @@ export default function Riwayat() {
                     </div>
                     <div>
                       <p className="text-[10px] text-gray-400 font-semibold uppercase">
-                        Keluar
+                        Pulang
                       </p>
                       <p className="font-bold text-gray-800">
                         {item.check_out

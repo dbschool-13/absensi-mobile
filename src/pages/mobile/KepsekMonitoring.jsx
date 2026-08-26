@@ -227,7 +227,7 @@ export default function KepsekMonitoring() {
                     <div className="w-[1px] bg-gray-100"></div>
                     <div className="flex-1">
                       <p className="text-[9px] text-gray-400 uppercase font-bold tracking-wider mb-1">
-                        Keluar
+                        Pulang
                       </p>
                       {isPulang ? (
                         <div className="flex items-center gap-2">
