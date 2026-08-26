@@ -407,7 +407,7 @@ export default function Dashboard() {
                 <LogOut size={14} className="text-red-500" />
               </div>
               <span className="text-[10px] font-bold uppercase tracking-wider">
-                Absen Keluar
+                Absen Pulang
               </span>
             </div>
             <p className="text-3xl font-black text-gray-800 relative z-10">
@@ -585,7 +585,7 @@ export default function Dashboard() {
               >
                 {modalType === "datang"
                   ? "Kirim Absen Masuk"
-                  : "Kirim Absen Keluar"}
+                  : "Kirim Absen Pulang"}
               </button>
             </div>
           </div>
