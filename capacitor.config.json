@@ -1,0 +1,6 @@
+{
+  "appId": "com.sekolah.absensipromobile",
+  "appName": "AbsensiProMobile",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

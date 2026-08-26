@@ -1,0 +1,80 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-gray-800 font-sans antialiased;
+    -webkit-tap-highlight-color: transparent; /* Hilangkan efek tap biru di mobile */
+  }
+}
+
+@layer components {
+  /* Class untuk Glassmorphism Effect */
+  .glass-card {
+    @apply bg-white bg-opacity-70 backdrop-blur-lg border border-white border-opacity-30 shadow-glass rounded-2xl;
+  }
+  
+  .glass-nav {
+    @apply bg-white bg-opacity-90 backdrop-blur-md border-t border-gray-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)];
+  }
+
+  /* Button Premium */
+  .btn-primary {
+    @apply bg-gradient-to-r from-primary to-primary_dark text-white font-medium py-3 px-6 rounded-xl shadow-lg shadow-primary/30 transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100;
+  }
+}
+
+/* Sembunyikan scrollbar tapi tetap bisa di-scroll */
+::-webkit-scrollbar {
+  width: 0px;
+  background: transparent;
+}
+
+/* Animasi untuk Bottom Sheet Modal */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Animasi Pulse untuk Tombol Aktif */
+@keyframes softPulse {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+  70% { box-shadow: 0 0 0 15px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+.btn-active-pulse {
+  animation: softPulse 2s infinite;
+}
+
+/* Animasi Bergerak Latar Belakang Gradasi */
+@keyframes gradientMove {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.animate-gradient-bg {
+  background-size: 200% 200%;
+  animation: gradientMove 8s ease infinite;
+}
+
+/* Animasi Masuk Berurutan (Staggered Fade In Up) */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 0; /* Mulai dari tak terlihat */
+}
