@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../../contexts/AuthContext";
-import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 import { useGeolocation } from "../../hooks/useGeolocation";
 import { calculateDistance } from "../../utils/distanceCalculator";
 import { attendanceService } from "../../services/attendanceService";
 import RadiusMap from "../../components/map/RadiusMap";
+import toast from "react-hot-toast";
 import {
   AlertCircle,
   CheckCircle,
@@ -42,6 +42,11 @@ export default function Dashboard() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState(null);
 
+  const [isCameraMode, setIsCameraMode] = useState(false);
+  const [isMapReady, setIsMapReady] = useState(false);
+  const videoRef = useRef(null);
+  const [stream, setStream] = useState(null);
+
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -70,59 +75,71 @@ export default function Dashboard() {
     }
   }, [latitude, longitude, schoolData]);
 
+  // 1. Fungsi buka modal
   const openModal = (type) => {
     setModalType(type);
+    setIsCameraMode(false);
     setIsModalOpen(true);
+    setIsMapReady(false); // Matikan peta dulu
+
+    // Tahan peta selama 400ms (menunggu animasi pop-up selesai) baru render
+    setTimeout(() => {
+      setIsMapReady(true);
+    }, 400);
   };
+
+  // 2. Fungsi tutup modal
   const closeModal = () => {
     setIsModalOpen(false);
     setModalType(null);
+    setIsCameraMode(false);
+    setIsMapReady(false); // Reset peta
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      setStream(null);
+    }
   };
 
+  // 3. Fungsi mengubah modal menjadi Layar Kamera
+  const startCamera = async () => {
+    setIsCameraMode(true);
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: 500 },
+      });
+      setStream(mediaStream);
+
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+        }
+      }, 100);
+    } catch (error) {
+      toast.error("Izin kamera ditolak atau tidak tersedia!");
+      setIsCameraMode(false);
+    }
+  };
+
+  // 4. Fungsi memotret dan menyimpan
   const handleSaveAttendance = async () => {
     try {
-      // ======================================================================
-      // TRIK KHUSUS WEB & PWA: Hancurkan Tombol Galeri di Shadow DOM
-      // ======================================================================
-      setTimeout(() => {
-        try {
-          const pwaModal = document.querySelector("pwa-camera-modal-instance");
-          if (pwaModal && pwaModal.shadowRoot) {
-            const pwaCamera = pwaModal.shadowRoot.querySelector("pwa-camera");
-            if (pwaCamera && pwaCamera.shadowRoot) {
-              // Suntikkan CSS pemusnah tombol galeri secara paksa
-              const style = document.createElement("style");
-              style.innerHTML = `
-                .gallery { display: none !important; visibility: hidden !important; pointer-events: none !important; }
-                input[type="file"] { display: none !important; }
-              `;
-              pwaCamera.shadowRoot.appendChild(style);
-            }
-          }
-        } catch (err) {
-          console.log("Shadow DOM bypass failed");
-        }
-      }, 50); // Eksekusi dalam hitungan milidetik setelah kamera dipanggil
-      // ======================================================================
+      if (!videoRef.current || !stream)
+        return toast.error("Kamera belum siap.");
 
-      // 1. PANGGIL KAMERA DENGAN KOMPRESI EKSTRIM
-      const image = await Camera.getPhoto({
-        quality: 40,
-        allowEditing: false,
-        resultType: CameraResultType.Base64,
-        source: CameraSource.Camera,
-        webUseInput: false, // Matikan input cadangan
-        direction: "FRONT",
-        width: 500,
-      });
+      const canvas = document.createElement("canvas");
+      canvas.width = 500;
+      canvas.height =
+        (videoRef.current.videoHeight / videoRef.current.videoWidth) * 500;
+      const ctx = canvas.getContext("2d");
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+
+      const base64PhotoURL = canvas.toDataURL("image/jpeg", 0.5);
 
       closeModal();
       setGlobalLoading(true);
 
-      // 2. RAKIT TEKS BASE64 MENJADI URL GAMBAR
-      const base64PhotoURL = `data:image/jpeg;base64,${image.base64String}`;
-
-      // 3. SIMPAN LANGSUNG KE FIRESTORE
       if (modalType === "datang") {
         const result = await attendanceService.checkIn(
           user.nip,
@@ -147,8 +164,7 @@ export default function Dashboard() {
 
       setGlobalLoading(false);
     } catch (error) {
-      console.log("Selfie dibatalkan:", error);
-      toast.error("Absen dibatalkan. Wajib menyertakan foto selfie!");
+      toast.error("Terjadi kesalahan saat memproses foto.");
       setGlobalLoading(false);
     }
   };
@@ -156,7 +172,6 @@ export default function Dashboard() {
   const hasCheckedIn = !!todayAtt?.check_in;
   const hasCheckedOut = !!todayAtt?.check_out;
 
-  // Logika Hari Kerja
   const todayStr = format(currentTime, "yyyy-MM-dd");
   const todayDayOfWeek = currentTime.getDay();
   const workingDaysDef = schoolData?.working_days || [1, 2, 3, 4, 5];
@@ -165,7 +180,6 @@ export default function Dashboard() {
   const isHoliday = !!holidayData;
   const isWorkingDay = workingDaysDef.includes(todayDayOfWeek) && !isHoliday;
 
-  // Logika Waktu
   const currentHM = format(currentTime, "HH:mm");
   const timeRules = schoolData?.time_rules || {
     check_in_start: "06:00",
@@ -180,7 +194,6 @@ export default function Dashboard() {
     currentHM >= timeRules.check_out_start &&
     currentHM <= timeRules.check_out_end;
 
-  // Kalkulasi Target 8 Jam
   const targetMinutes = 8 * 60;
   let workedMinutes = 0;
 
@@ -213,7 +226,6 @@ export default function Dashboard() {
     return "Selamat Malam";
   };
 
-  // Setup SVG Circular Progress
   const circleRadius = 38;
   const circleCircumference = 2 * Math.PI * circleRadius;
   const strokeDashoffset =
@@ -221,15 +233,10 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-[#F4F6F9] pb-32 font-sans overflow-x-hidden">
-      {/* ========================================== */}
-      {/* 1. HEADER (Animated Gradient)              */}
-      {/* ========================================== */}
       <div className="bg-gradient-to-br from-indigo-500 via-primary to-violet-600 animate-gradient-bg text-white pt-12 pb-24 px-6 rounded-b-[3rem] shadow-xl relative overflow-hidden">
-        {/* Abstract Ornaments */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3"></div>
         <div className="absolute bottom-10 left-10 w-32 h-32 bg-white opacity-10 rounded-full blur-2xl"></div>
 
-        {/* Top Navbar */}
         <div className="flex justify-between items-center relative z-10 mb-8">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30 shadow-inner">
@@ -258,7 +265,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Big Clock Area */}
         <div className="relative z-10 text-center flex flex-col items-center">
           <h1 className="text-4xl font-black tracking-tighter drop-shadow-lg flex items-baseline justify-center">
             {format(currentTime, "HH:mm")}
@@ -272,11 +278,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ========================================== */}
-      {/* 2. MAIN CARDS (Staggered Animations)       */}
-      {/* ========================================== */}
       <div className="-mt-14 mx-5 space-y-5 relative z-20">
-        {/* A. Status Lokasi & Badge Hari (Hero Card) */}
         <div
           className="bg-white/80 backdrop-blur-2xl rounded-3xl shadow-xl shadow-indigo-900/10 p-1 border border-white animate-fade-in-up"
           style={{ animationDelay: "0.1s" }}
@@ -290,7 +292,6 @@ export default function Dashboard() {
                     : "bg-red-50 text-red-500"
                 }`}
               >
-                {/* Ping Animation on Map Icon */}
                 {isInRadius && (
                   <div className="absolute inset-0 bg-emerald-400 rounded-full animate-ping opacity-20"></div>
                 )}
@@ -340,7 +341,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Badge Hari Kerja / Libur (Terintegrasi rapi di bawah lokasi) */}
           <div className="px-5 py-3 border-t border-gray-100 flex justify-between items-center bg-gray-50/50 rounded-b-[1.3rem]">
             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
               Jadwal Hari Ini
@@ -358,18 +358,15 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* B. Progress Cincin (Circular Progress) */}
         <div
           className="bg-white rounded-3xl shadow-lg shadow-gray-200/50 p-5 border border-gray-100 flex items-center gap-6 animate-fade-in-up"
           style={{ animationDelay: "0.2s" }}
         >
-          {/* Custom Circular SVG */}
           <div className="relative w-24 h-24 flex-shrink-0 flex items-center justify-center">
             <svg
               className="w-full h-full transform -rotate-90"
               viewBox="0 0 100 100"
             >
-              {/* Background Circle */}
               <circle
                 cx="50"
                 cy="50"
@@ -379,7 +376,6 @@ export default function Dashboard() {
                 fill="transparent"
                 className="text-gray-100"
               />
-              {/* Progress Circle */}
               <circle
                 cx="50"
                 cy="50"
@@ -400,7 +396,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Progress Details */}
           <div className="flex-1">
             <p className="text-[10px] font-bold uppercase tracking-wider text-primary mb-1">
               Target 8 Jam
@@ -421,7 +416,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* C. Grid Jam Masuk & Keluar */}
         <div
           className="grid grid-cols-2 gap-4 animate-fade-in-up"
           style={{ animationDelay: "0.3s" }}
@@ -472,9 +466,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ========================================== */}
-      {/* 3. FLOATING DOCK ACTION BUTTONS            */}
-      {/* ========================================== */}
       <div
         className="fixed bottom-24 left-0 w-full px-5 z-40 animate-fade-in-up"
         style={{ animationDelay: "0.4s" }}
@@ -559,9 +550,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ========================================== */}
-      {/* 4. MODAL BOTTOM SHEET                      */}
-      {/* ========================================== */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/40 backdrop-blur-sm transition-opacity">
           <div className="absolute inset-0" onClick={closeModal}></div>
@@ -586,55 +574,124 @@ export default function Dashboard() {
             </div>
 
             <div className="px-6 space-y-4 mt-4">
-              <div className="h-[200px] w-full rounded-[2rem] overflow-hidden shadow-inner border border-gray-100 relative">
-                <RadiusMap
-                  userLat={latitude}
-                  userLon={longitude}
-                  schoolLat={schoolData?.latitude}
-                  schoolLon={schoolData?.longitude}
-                  radius={schoolData?.radius_meters || 50}
-                />
-              </div>
-              <div
-                className={`p-4 rounded-[1.5rem] flex items-center justify-center gap-3 border ${
-                  isInRadius
-                    ? "bg-emerald-50 border-emerald-100 text-emerald-600"
-                    : "bg-red-50 border-red-100 text-red-600"
-                }`}
-              >
-                {isInRadius ? (
-                  <CheckCircle size={22} />
-                ) : (
-                  <AlertCircle size={22} />
-                )}
-                <span className="font-bold text-sm uppercase tracking-wide">
-                  {isInRadius
-                    ? `Lokasi Valid (${distance}m)`
-                    : `Di Luar Area (${distance}m)`}
-                </span>
-              </div>
+              {!isCameraMode ? (
+                <>
+                  {/* BUNGKUSAN PETA YANG DIPERKETAT */}
+                  <div className="h-[200px] w-full bg-slate-100 rounded-[2rem] overflow-hidden relative border-4 border-white mb-4 shadow-inner">
+                    {latitude &&
+                    longitude &&
+                    schoolData?.latitude &&
+                    schoolData?.longitude &&
+                    isMapReady ? (
+                      // Inline style absolute memaksa Leaflet menghitung ukuran 100% dari parent
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                        }}
+                      >
+                        <RadiusMap
+                          key={`map-${latitude}-${longitude}-${isModalOpen}`}
+                          userLat={latitude}
+                          userLng={longitude}
+                          schoolLat={schoolData.latitude}
+                          schoolLng={schoolData.longitude}
+                          radius={schoolData.radius_meters}
+                        />
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center flex-col gap-2 bg-slate-50 z-10">
+                        <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-gray-400 text-[10px] font-bold animate-pulse">
+                          {!isMapReady
+                            ? "Menyesuaikan Peta..."
+                            : "Mencari GPS..."}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div
+                    className={`p-4 rounded-[1.5rem] flex items-center justify-center gap-3 border ${
+                      isInRadius
+                        ? "bg-emerald-50 border-emerald-100 text-emerald-600"
+                        : "bg-red-50 border-red-100 text-red-600"
+                    }`}
+                  >
+                    {isInRadius ? (
+                      <CheckCircle size={22} />
+                    ) : (
+                      <AlertCircle size={22} />
+                    )}
+                    <span className="font-bold text-sm uppercase tracking-wide">
+                      {isInRadius
+                        ? `Lokasi Valid (${distance}m)`
+                        : `Di Luar Area (${distance}m)`}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="h-[280px] w-full bg-slate-900 rounded-[2rem] overflow-hidden shadow-inner relative border-4 border-gray-100">
+                    {stream ? (
+                      <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover transform scale-x-[-1]"
+                      ></video>
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="text-gray-400 text-xs font-bold animate-pulse">
+                          Menyiapkan Kamera...
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="absolute inset-0 border-2 border-dashed border-white/40 rounded-[2rem] pointer-events-none m-6 opacity-70"></div>
+
+                    <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm px-2 py-1 rounded-md">
+                      <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                      <span className="text-[9px] font-bold text-white uppercase tracking-widest">
+                        Live
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-center text-xs text-gray-500 font-bold animate-pulse">
+                    Posisikan wajah Anda pada bingkai
+                  </p>
+                </>
+              )}
             </div>
 
-            <div className="px-6 mt-6 flex gap-4">
+            <div className="p-6 pt-2 flex gap-3">
               <button
                 onClick={closeModal}
-                className="w-1/3 py-4 rounded-[1.5rem] font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-colors"
+                className="flex-1 py-3.5 rounded-2xl font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-colors"
               >
                 Batal
               </button>
-              <button
-                onClick={handleSaveAttendance}
-                disabled={!isInRadius}
-                className={`flex-1 py-4 rounded-[1.5rem] font-bold text-white shadow-xl transition-transform active:scale-95 flex justify-center items-center ${
-                  modalType === "datang"
-                    ? "bg-gradient-to-r from-emerald-500 to-emerald-400 shadow-emerald-500/40"
-                    : "bg-gradient-to-r from-red-500 to-red-400 shadow-red-500/40"
-                }`}
-              >
-                {modalType === "datang"
-                  ? "Kirim Absen Masuk"
-                  : "Kirim Absen Pulang"}
-              </button>
+
+              {!isCameraMode ? (
+                <button
+                  onClick={startCamera}
+                  disabled={!isInRadius}
+                  className="flex-1 py-3.5 rounded-2xl font-bold text-white bg-primary hover:bg-primary_dark shadow-lg shadow-primary/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                >
+                  Kirim Absen
+                </button>
+              ) : (
+                <button
+                  onClick={handleSaveAttendance}
+                  className="flex-1 py-3.5 rounded-2xl font-bold text-white bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/30 flex items-center justify-center gap-2 transition-all animate-[flyIn_0.3s_ease-out]"
+                >
+                  Simpan
+                </button>
+              )}
             </div>
           </div>
         </div>
