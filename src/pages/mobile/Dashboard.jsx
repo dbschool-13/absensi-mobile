@@ -81,24 +81,48 @@ export default function Dashboard() {
 
   const handleSaveAttendance = async () => {
     try {
-      // 1. PANGGIL KAMERA DENGAN KOMPRESI EKSTRIM (WAJIB UNTUK BASE64)
+      // ======================================================================
+      // TRIK KHUSUS WEB & PWA: Hancurkan Tombol Galeri di Shadow DOM
+      // ======================================================================
+      setTimeout(() => {
+        try {
+          const pwaModal = document.querySelector("pwa-camera-modal-instance");
+          if (pwaModal && pwaModal.shadowRoot) {
+            const pwaCamera = pwaModal.shadowRoot.querySelector("pwa-camera");
+            if (pwaCamera && pwaCamera.shadowRoot) {
+              // Suntikkan CSS pemusnah tombol galeri secara paksa
+              const style = document.createElement("style");
+              style.innerHTML = `
+                .gallery { display: none !important; visibility: hidden !important; pointer-events: none !important; }
+                input[type="file"] { display: none !important; }
+              `;
+              pwaCamera.shadowRoot.appendChild(style);
+            }
+          }
+        } catch (err) {
+          console.log("Shadow DOM bypass failed");
+        }
+      }, 50); // Eksekusi dalam hitungan milidetik setelah kamera dipanggil
+      // ======================================================================
+
+      // 1. PANGGIL KAMERA DENGAN KOMPRESI EKSTRIM
       const image = await Camera.getPhoto({
-        quality: 40, // Diturunkan ke 40 agar Base64 lebih pendek
+        quality: 40,
         allowEditing: false,
-        resultType: CameraResultType.Base64, // Ambil data sebagai teks Base64
+        resultType: CameraResultType.Base64,
         source: CameraSource.Camera,
+        webUseInput: false, // Matikan input cadangan
         direction: "FRONT",
-        width: 500, // Ukuran diperkecil ke 500px agar aman di database
+        width: 500,
       });
 
       closeModal();
       setGlobalLoading(true);
 
-      // 2. RAKIT TEKS BASE64 MENJADI URL GAMBAR STANDAR HTML
-      // Format ini bisa langsung dimasukkan ke src pada tag <img>
+      // 2. RAKIT TEKS BASE64 MENJADI URL GAMBAR
       const base64PhotoURL = `data:image/jpeg;base64,${image.base64String}`;
 
-      // 3. SIMPAN LANGSUNG KE FIRESTORE (Tidak perlu Storage!)
+      // 3. SIMPAN LANGSUNG KE FIRESTORE
       if (modalType === "datang") {
         const result = await attendanceService.checkIn(
           user.nip,
