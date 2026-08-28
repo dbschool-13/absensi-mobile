@@ -70,7 +70,7 @@ export default function RadiusMap({
           fillColor: "#4F46E5",
           fillOpacity: 0.2,
         }}
-        radius={radius}
+        radius={Number(radius) || 60}
       />
 
       {/* Marker Lokasi User */}

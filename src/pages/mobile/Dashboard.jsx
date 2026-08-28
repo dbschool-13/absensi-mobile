@@ -104,39 +104,53 @@ export default function Dashboard() {
   const startCamera = async () => {
     setIsCameraMode(true);
     try {
+      // PERBAIKAN 1: Hapus batasan width agar iPhone bebas menggunakan resolusi aslinya
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: 500 },
+        video: { facingMode: "user" },
       });
       setStream(mediaStream);
 
+      // PERBAIKAN 2: Beri jeda sedikit lebih lama, lalu paksa Play!
       setTimeout(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
+          // Paksaan Play wajib untuk sistem iOS
+          videoRef.current
+            .play()
+            .catch((err) => console.log("iOS Play Error:", err));
         }
-      }, 100);
+      }, 300);
     } catch (error) {
-      toast.error("Izin kamera ditolak atau tidak tersedia!");
+      toast.error("Izin kamera ditolak atau diblokir oleh Safari/iPhone!");
       setIsCameraMode(false);
     }
   };
 
   // 4. Fungsi memotret dan menyimpan
+  // 4. Fungsi memotret dan menyimpan
   const handleSaveAttendance = async () => {
     try {
-      if (!videoRef.current || !stream)
-        return toast.error("Kamera belum siap.");
+      // PERBAIKAN 3: Cegah klik simpan jika kamera iPhone masih nge-blank (Video width = 0)
+      if (!videoRef.current || !stream || videoRef.current.videoWidth === 0) {
+        return toast.error("Kamera sedang dimuat, mohon tunggu sebentar.");
+      }
 
+      // Jepret dan Kompresi Cerdas (Menyesuaikan rasio asli HP)
       const canvas = document.createElement("canvas");
-      canvas.width = 500;
-      canvas.height =
-        (videoRef.current.videoHeight / videoRef.current.videoWidth) * 500;
+      const targetWidth = 500; // Target akhir tetap 500px agar ringan di database
+      const scale = targetWidth / videoRef.current.videoWidth;
+
+      canvas.width = targetWidth;
+      canvas.height = videoRef.current.videoHeight * scale;
+
       const ctx = canvas.getContext("2d");
       ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
+      ctx.scale(-1, 1); // Efek Cermin
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
 
       const base64PhotoURL = canvas.toDataURL("image/jpeg", 0.5);
 
+      // ... KODE BAWAHNYA TETAP SAMA SEPERTI SEBELUMNYA ...
       closeModal();
       setGlobalLoading(true);
 
@@ -641,6 +655,7 @@ export default function Dashboard() {
                         ref={videoRef}
                         autoPlay
                         playsInline
+                        webkit-playsinline="true"
                         muted
                         className="w-full h-full object-cover transform scale-x-[-1]"
                       ></video>

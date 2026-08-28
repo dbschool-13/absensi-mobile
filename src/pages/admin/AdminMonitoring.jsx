@@ -239,7 +239,7 @@ export default function AdminMonitoring() {
                       <td className="p-5 text-center">
                         {isPulang ? (
                           <span className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-full text-xs font-bold border border-indigo-200">
-                            Selesai Berdinas
+                            Selesai
                           </span>
                         ) : isHadir ? (
                           <span className="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-full text-xs font-bold border border-emerald-200 flex items-center justify-center w-fit mx-auto gap-1">
