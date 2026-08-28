@@ -680,7 +680,7 @@ export default function Dashboard() {
                 <button
                   onClick={startCamera}
                   disabled={!isInRadius}
-                  className="flex-1 py-3.5 rounded-2xl font-bold text-white bg-primary hover:bg-primary_dark shadow-lg shadow-primary/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                  className="flex-1 py-3.5 rounded-2xl font-bold text-white bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-primary/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
                 >
                   Kirim Absen
                 </button>
