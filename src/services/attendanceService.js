@@ -28,7 +28,14 @@ export const attendanceService = {
   },
 
   // 2. Proses Absen Datang
-  checkIn: async (userId, schoolId, latitude, longitude, distance) => {
+  checkIn: async (
+    userId,
+    schoolId,
+    latitude,
+    longitude,
+    distance,
+    photoUrl,
+  ) => {
     try {
       const dateStr = getTodayString();
       const docId = `${userId}_${dateStr}`;
@@ -46,6 +53,7 @@ export const attendanceService = {
           latitude,
           longitude,
           distance_meters: distance,
+          photo_url: photoUrl,
           device_info: deviceInfo,
         },
         check_out: null,
@@ -64,7 +72,14 @@ export const attendanceService = {
   },
 
   // 3. Proses Absen Pulang
-  checkOut: async (userId, latitude, longitude, distance, checkInTime) => {
+  checkOut: async (
+    userId,
+    latitude,
+    longitude,
+    distance,
+    checkInTime,
+    photoUrl,
+  ) => {
     try {
       const docId = `${userId}_${getTodayString()}`;
       const docRef = doc(db, "attendances", docId);
@@ -86,6 +101,7 @@ export const attendanceService = {
           latitude,
           longitude,
           distance_meters: distance,
+          photo_url: photoUrl,
         },
         total_hours: totalHours,
         status: finalStatus,
@@ -104,8 +120,9 @@ export const attendanceService = {
   // 4. Ambil Riwayat Absen berdasarkan Bulan & Tahun
   getHistory: async (userId, month, year) => {
     try {
-      const { collection, query, where, getDocs } =
-        await import("firebase/firestore");
+      const { collection, query, where, getDocs } = await import(
+        "firebase/firestore"
+      );
 
       // Ambil semua absen milik user ini (Menghindari error Composite Index Firebase)
       const q = query(

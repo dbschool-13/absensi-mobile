@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
+import { Camera, CameraResultType, CameraSource } from "@capacitor/camera";
 import { useGeolocation } from "../../hooks/useGeolocation";
 import { calculateDistance } from "../../utils/distanceCalculator";
 import { attendanceService } from "../../services/attendanceService";
@@ -79,30 +80,53 @@ export default function Dashboard() {
   };
 
   const handleSaveAttendance = async () => {
-    closeModal();
-    setGlobalLoading(true);
+    try {
+      // 1. PANGGIL KAMERA DENGAN KOMPRESI EKSTRIM (WAJIB UNTUK BASE64)
+      const image = await Camera.getPhoto({
+        quality: 40, // Diturunkan ke 40 agar Base64 lebih pendek
+        allowEditing: false,
+        resultType: CameraResultType.Base64, // Ambil data sebagai teks Base64
+        source: CameraSource.Camera,
+        direction: "FRONT",
+        width: 500, // Ukuran diperkecil ke 500px agar aman di database
+      });
 
-    if (modalType === "datang") {
-      const result = await attendanceService.checkIn(
-        user.nip,
-        user.school_id,
-        latitude,
-        longitude,
-        distance,
-      );
-      if (result) setTodayAtt({ ...todayAtt, ...result });
-    } else if (modalType === "pulang") {
-      const result = await attendanceService.checkOut(
-        user.nip,
-        latitude,
-        longitude,
-        distance,
-        todayAtt.check_in.time,
-      );
-      if (result) setTodayAtt((prev) => ({ ...prev, ...result }));
+      closeModal();
+      setGlobalLoading(true);
+
+      // 2. RAKIT TEKS BASE64 MENJADI URL GAMBAR STANDAR HTML
+      // Format ini bisa langsung dimasukkan ke src pada tag <img>
+      const base64PhotoURL = `data:image/jpeg;base64,${image.base64String}`;
+
+      // 3. SIMPAN LANGSUNG KE FIRESTORE (Tidak perlu Storage!)
+      if (modalType === "datang") {
+        const result = await attendanceService.checkIn(
+          user.nip,
+          user.school_id,
+          latitude,
+          longitude,
+          distance,
+          base64PhotoURL,
+        );
+        if (result) setTodayAtt({ ...todayAtt, ...result });
+      } else if (modalType === "pulang") {
+        const result = await attendanceService.checkOut(
+          user.nip,
+          latitude,
+          longitude,
+          distance,
+          todayAtt.check_in.time,
+          base64PhotoURL,
+        );
+        if (result) setTodayAtt((prev) => ({ ...prev, ...result }));
+      }
+
+      setGlobalLoading(false);
+    } catch (error) {
+      console.log("Selfie dibatalkan:", error);
+      toast.error("Absen dibatalkan. Wajib menyertakan foto selfie!");
+      setGlobalLoading(false);
     }
-
-    setGlobalLoading(false);
   };
 
   const hasCheckedIn = !!todayAtt?.check_in;
