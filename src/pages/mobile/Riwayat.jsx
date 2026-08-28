@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { attendanceService } from "../../services/attendanceService";
-import { Calendar, Clock, Target, ChevronDown } from "lucide-react";
+import {
+  Calendar,
+  Clock,
+  Target,
+  ChevronDown,
+  AlertCircle,
+} from "lucide-react"; // <-- Tambah AlertCircle
 import { format, parseISO } from "date-fns";
 import { id } from "date-fns/locale";
 
@@ -33,7 +39,7 @@ export default function Riwayat() {
   ];
 
   const currentYear = parseInt(format(currentDate, "yyyy"));
-  const years = [currentYear - 1, currentYear, currentYear + 1]; // Menampilkan tahun lalu, sekarang, depan
+  const years = [currentYear - 1, currentYear, currentYear + 1];
 
   // Fetch Data setiap kali Bulan/Tahun berubah
   useEffect(() => {
@@ -70,7 +76,7 @@ export default function Riwayat() {
         </div>
       </div>
 
-      {/* FILTER SECTION (Overlapping Card) */}
+      {/* FILTER SECTION */}
       <div className="-mt-8 mx-5 bg-white rounded-2xl shadow-xl shadow-gray-200/50 p-4 relative z-20 border border-gray-100 flex gap-3">
         {/* Dropdown Bulan */}
         <div className="flex-1 relative">
@@ -114,7 +120,7 @@ export default function Riwayat() {
       {/* LIST RIWAYAT SECTION */}
       <div className="px-5 mt-6 space-y-4">
         {loading ? (
-          // Skeleton Loading Premium
+          // Skeleton Loading
           [1, 2, 3].map((n) => (
             <div
               key={n}
@@ -144,6 +150,22 @@ export default function Riwayat() {
             const dateObj = parseISO(item.date);
             const isCompleted = item.status === "Memenuhi Target";
 
+            // Logika Menghitung Kekurangan Jam (jika sudah pulang dan kurang dari 8 jam)
+            let shortText = null;
+            if (item.check_out && !isCompleted && item.total_hours < 8) {
+              const targetMinutes = 8 * 60; // 480 menit
+              const workedMinutes = Math.round(item.total_hours * 60);
+              const shortfall = targetMinutes - workedMinutes;
+
+              if (shortfall > 0) {
+                const shortH = Math.floor(shortfall / 60);
+                const shortM = shortfall % 60;
+                shortText = `Kurang ${
+                  shortH > 0 ? `${shortH}j ` : ""
+                }${shortM}m`;
+              }
+            }
+
             return (
               <div
                 key={item.id}
@@ -165,8 +187,8 @@ export default function Riwayat() {
                       isCompleted
                         ? "bg-emerald-50 text-emerald-600"
                         : item.status === "Belum Pulang"
-                          ? "bg-blue-50 text-blue-600"
-                          : "bg-red-50 text-red-600"
+                        ? "bg-blue-50 text-blue-600"
+                        : "bg-red-50 text-red-600"
                     }`}
                   >
                     {item.status}
@@ -218,19 +240,31 @@ export default function Riwayat() {
                   </div>
                 </div>
 
-                {/* Total Jam Kerja */}
+                {/* Total Jam Kerja & Kekurangan */}
                 {item.check_out && (
-                  <div className="bg-gray-50 rounded-xl p-3 flex justify-between items-center mt-1">
-                    <div className="flex items-center gap-2 text-gray-600">
-                      <Target size={14} />
-                      <span className="text-xs font-semibold">
-                        Total Durasi
+                  <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1 mt-1">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2 text-gray-600">
+                        <Target size={14} />
+                        <span className="text-xs font-semibold">
+                          Total Durasi
+                        </span>
+                      </div>
+                      <span className="text-sm font-bold text-gray-800">
+                        {Math.floor(item.total_hours)} Jam{" "}
+                        {Math.round((item.total_hours % 1) * 60)} Menit
                       </span>
                     </div>
-                    <span className="text-sm font-bold text-gray-800">
-                      {Math.floor(item.total_hours)} Jam{" "}
-                      {Math.round((item.total_hours % 1) * 60)} Menit
-                    </span>
+
+                    {/* BAGIAN TAMBAHAN: Muncul hanya jika kurang dari target */}
+                    {shortText && (
+                      <div className="flex justify-end items-center gap-1.5 mt-0.5">
+                        <AlertCircle size={12} className="text-orange-500" />
+                        <span className="text-[11px] font-bold text-orange-500">
+                          {shortText}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

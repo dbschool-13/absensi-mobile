@@ -8,7 +8,6 @@ import toast from "react-hot-toast";
 import {
   AlertCircle,
   CheckCircle,
-  Clock,
   X,
   User as UserIcon,
   LogIn,
@@ -22,6 +21,24 @@ import {
 } from "lucide-react";
 import { format, differenceInMinutes } from "date-fns";
 import { id } from "date-fns/locale";
+import * as faceapi from "face-api.js";
+
+// Komponen Jam Mandiri (Hanya komponen ini yang akan merender setiap detik)
+const LiveClock = () => {
+  const [time, setTime] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <h1 className="text-4xl font-black tracking-tighter drop-shadow-lg flex items-baseline justify-center">
+      {format(time, "HH:mm")}
+      <span className="text-xl font-bold opacity-70 ml-1">
+        :{format(time, "ss")}
+      </span>
+    </h1>
+  );
+};
 
 export default function Dashboard() {
   const { user, schoolData, setGlobalLoading } = useAuth();
@@ -36,7 +53,7 @@ export default function Dashboard() {
   const [distance, setDistance] = useState(null);
   const [isInRadius, setIsInRadius] = useState(false);
 
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const currentTime = new Date();
   const [todayAtt, setTodayAtt] = useState(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -46,11 +63,7 @@ export default function Dashboard() {
   const [isMapReady, setIsMapReady] = useState(false);
   const videoRef = useRef(null);
   const [stream, setStream] = useState(null);
-
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+  const [isAiLoaded, setIsAiLoaded] = useState(false);
 
   useEffect(() => {
     const fetchTodayAtt = async () => {
@@ -75,6 +88,21 @@ export default function Dashboard() {
     }
   }, [latitude, longitude, schoolData]);
 
+  useEffect(() => {
+    const loadAI = async () => {
+      try {
+        // Mengambil model langsung dari CDN resmi agar dijamin 100% utuh
+        const MODEL_URL =
+          "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights";
+        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        setIsAiLoaded(true); // Tandai bahwa AI siap digunakan
+      } catch (err) {
+        console.error("Gagal memuat AI:", err);
+      }
+    };
+    loadAI();
+  }, []);
+
   // 1. Fungsi buka modal
   const openModal = (type) => {
     setModalType(type);
@@ -93,10 +121,11 @@ export default function Dashboard() {
     setIsModalOpen(false);
     setModalType(null);
     setIsCameraMode(false);
-    setIsMapReady(false); // Reset peta
+    setIsMapReady(false);
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
       setStream(null);
+      if (videoRef.current) videoRef.current.srcObject = null; // Kosongkan memori video
     }
   };
 
@@ -126,34 +155,52 @@ export default function Dashboard() {
     }
   };
 
-  // 4. Fungsi memotret dan menyimpan
-  // 4. Fungsi memotret dan menyimpan
+  // 4. Fungsi memotret dan menyimpan (DIPERKETAT DENGAN AI)
   const handleSaveAttendance = async () => {
     try {
-      // PERBAIKAN 3: Cegah klik simpan jika kamera iPhone masih nge-blank (Video width = 0)
-      if (!videoRef.current || !stream || videoRef.current.videoWidth === 0) {
-        return toast.error("Kamera sedang dimuat, mohon tunggu sebentar.");
-      }
+      if (!videoRef.current || !stream)
+        return toast.error("Kamera belum siap.");
 
-      // Jepret dan Kompresi Cerdas (Menyesuaikan rasio asli HP)
+      // 1. Jepret Gambar ke Canvas
       const canvas = document.createElement("canvas");
-      const targetWidth = 500; // Target akhir tetap 500px agar ringan di database
-      const scale = targetWidth / videoRef.current.videoWidth;
-
-      canvas.width = targetWidth;
-      canvas.height = videoRef.current.videoHeight * scale;
-
+      canvas.width = 500;
+      canvas.height =
+        (videoRef.current.videoHeight / videoRef.current.videoWidth) * 500;
       const ctx = canvas.getContext("2d");
       ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1); // Efek Cermin
+      ctx.scale(-1, 1);
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
 
-      const base64PhotoURL = canvas.toDataURL("image/jpeg", 0.5);
-
-      // ... KODE BAWAHNYA TETAP SAMA SEPERTI SEBELUMNYA ...
-      closeModal();
       setGlobalLoading(true);
 
+      // KUNCI PENGAMAN: Cegah pemindaian jika model AI belum selesai di-download
+      if (!isAiLoaded) {
+        setGlobalLoading(false);
+        return toast.error(
+          "Sistem AI sedang disiapkan, mohon tunggu beberapa detik.",
+        );
+      }
+
+      // 2. SCAN WAJAH DENGAN AI (Validasi Ketat)
+      const detections = await faceapi.detectSingleFace(
+        canvas,
+        new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5 }), // Threshold 50% kemiripan wajah manusia
+      );
+
+      // Jika tidak ada wajah yang ditemukan di foto!
+      if (!detections) {
+        setGlobalLoading(false);
+        return toast.error(
+          "❌ Wajah tidak terdeteksi! Pastikan wajah Anda terlihat jelas.",
+        );
+      }
+
+      // 3. Jika wajah valid, convert ke Base64 dan lanjut simpan
+      const base64PhotoURL = canvas.toDataURL("image/jpeg", 0.5);
+
+      closeModal();
+
+      // (Lanjutan Simpan ke Firebase seperti biasa)
       if (modalType === "datang") {
         const result = await attendanceService.checkIn(
           user.nip,
@@ -177,6 +224,7 @@ export default function Dashboard() {
       }
 
       setGlobalLoading(false);
+      toast.success("Absen dan verifikasi wajah berhasil!");
     } catch (error) {
       toast.error("Terjadi kesalahan saat memproses foto.");
       setGlobalLoading(false);
@@ -232,6 +280,16 @@ export default function Dashboard() {
   const hoursWorked = Math.floor(Math.max(workedMinutes, 0) / 60);
   const minsWorked = Math.max(workedMinutes, 0) % 60;
 
+  // --- TAMBAHKAN KODE INI UNTUK MENGHITUNG KEKURANGAN (SELISIH) ---
+  const shortfallMinutes = Math.max(targetMinutes - workedMinutes, 0);
+  const shortHours = Math.floor(shortfallMinutes / 60);
+  const shortMins = shortfallMinutes % 60;
+
+  let shortText = "⚠️ Kurang ";
+  if (shortHours > 0) shortText += `${shortHours}j `;
+  shortText += `${shortMins}m`;
+  // ----------------------------------------------------------------
+
   const getGreeting = () => {
     const hour = currentTime.getHours();
     if (hour < 11) return "Selamat Pagi";
@@ -279,13 +337,11 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* Big Clock Area */}
         <div className="relative z-10 text-center flex flex-col items-center">
-          <h1 className="text-4xl font-black tracking-tighter drop-shadow-lg flex items-baseline justify-center">
-            {format(currentTime, "HH:mm")}
-            <span className="text-xl font-bold opacity-70 ml-1">
-              :{format(currentTime, "ss")}
-            </span>
-          </h1>
+          {/* PANGGIL KOMPONEN JAM DI SINI */}
+          <LiveClock />
+
           <p className="text-sm text-indigo-100 mt-2 font-semibold tracking-wide bg-white/10 px-4 py-1.5 rounded-full backdrop-blur-sm border border-white/10">
             {format(currentTime, "EEEE, dd MMMM yyyy", { locale: id })}
           </p>
@@ -415,14 +471,20 @@ export default function Dashboard() {
               Target 8 Jam
             </p>
             <h3 className="text-2xl font-black text-gray-800 mb-1">
-              {hoursWorked}j{" "}
-              <span className="text-base text-gray-500">{minsWorked}m</span>
+              {hoursWorked} Jam{" "}
+              <span className="text-sm text-gray-500">{minsWorked} menit</span>
             </h3>
-            <p className="text-xs font-medium text-gray-400">
+            <p
+              className={`text-xs font-medium ${
+                hasCheckedOut && progressPercent < 100
+                  ? "text-orange-500 font-bold"
+                  : "text-gray-400"
+              }`}
+            >
               {hasCheckedOut
                 ? progressPercent >= 100
                   ? "✅ Target Terpenuhi"
-                  : "⚠️ Kurang dari 8 Jam"
+                  : shortText
                 : hasCheckedIn
                 ? "Durasi berjalan..."
                 : "Belum absen masuk"}
