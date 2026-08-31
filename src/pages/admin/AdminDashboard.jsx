@@ -6,8 +6,10 @@ import { getFormattedDate } from "../../utils/timeUtils";
 
 export default function AdminDashboard() {
   const { user, schoolData } = useAuth();
+
+  // PERBAIKAN: Mengubah totalGuru menjadi totalPegawai
   const [stats, setStats] = useState({
-    totalGuru: 0,
+    totalPegawai: 0,
     hadir: 0,
     belumHadir: 0,
     persentase: 0,
@@ -19,7 +21,15 @@ export default function AdminDashboard() {
       if (user?.school_id) {
         setLoading(true);
         const data = await adminService.getDashboardStats(user.school_id);
-        setStats(data);
+
+        // Memastikan data yang diterima dari service di-mapping ke totalPegawai
+        setStats({
+          totalPegawai: data.totalPegawai || data.totalGuru || 0,
+          hadir: data.hadir || 0,
+          belumHadir: data.belumHadir || 0,
+          persentase: data.persentase || 0,
+        });
+
         setLoading(false);
       }
     };
@@ -62,7 +72,7 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Pegawai"
-          value={stats.totalGuru}
+          value={stats.totalPegawai} // PERBAIKAN: Menggunakan state totalPegawai
           icon={<Users size={28} />}
           colorClass="text-blue-600"
           bgColor="bg-blue-50"
@@ -90,7 +100,7 @@ export default function AdminDashboard() {
         />
       </div>
 
-      {/* Grafik / Progress (Placeholder Visual) */}
+      {/* Grafik / Progress */}
       <div className="bg-white p-8 rounded-3xl shadow-lg shadow-gray-200/40 border border-gray-100">
         <h3 className="text-lg font-bold text-gray-800 mb-6">
           Target Kehadiran Harian

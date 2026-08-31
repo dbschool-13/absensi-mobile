@@ -9,12 +9,11 @@ import {
   CalendarCheck,
 } from "lucide-react";
 import { format, eachDayOfInterval, endOfMonth } from "date-fns";
-import { id } from "date-fns/locale";
 
 import { exportToPDF } from "../../utils/exportPdf";
 import { exportToExcel } from "../../utils/exportExcel";
 
-// Fungsi Helper untuk membagi hari dalam sebulan menjadi daftar Minggu Dinamis
+// Fungsi Helper untuk membagi hari dalam sebulan menjadi daftar Minggu Dinamis (Blok 7 Hari Tetap)
 const getWorkingWeeks = (
   month,
   year,
@@ -22,36 +21,47 @@ const getWorkingWeeks = (
   holidays = [],
 ) => {
   const start = new Date(year, parseInt(month) - 1, 1);
-  const end = endOfMonth(start);
-  const days = eachDayOfInterval({ start, end });
+  const daysInMonth = endOfMonth(start).getDate();
 
   const weeks = [];
-  let currentWeek = [];
 
-  days.forEach((day) => {
-    const dayOfWeek = day.getDay(); // 0 = Minggu, 1 = Senin, ...
-    const dateStr = format(day, "yyyy-MM-dd");
-    const isHoliday = holidays.some((h) => h.date === dateStr);
+  // Format Standar Laporan Mingguan Instansi (Blok 7 Harian)
+  const chunkRanges = [
+    { id: 1, start: 1, end: 7 },
+    { id: 2, start: 8, end: 14 },
+    { id: 3, start: 15, end: 21 },
+    { id: 4, start: 22, end: 28 },
+    { id: 5, start: 29, end: 31 }, // Akan terpotong otomatis sesuai umur bulan
+  ];
 
-    // Masukkan ke array jika hari tersebut adalah HARI KERJA dan BUKAN HARI LIBUR
-    if (workingDays.includes(dayOfWeek) && !isHoliday) {
-      currentWeek.push(day);
-    }
+  chunkRanges.forEach((chunk) => {
+    // Lewati Minggu ke-5 jika bulan tersebut hanya sampai tanggal 28 (misal Februari)
+    if (chunk.start > daysInMonth) return;
 
-    // Tutup minggu jika hari ini adalah Minggu (0) atau hari terakhir di bulan tsb
-    if (dayOfWeek === 0 || day.getTime() === end.getTime()) {
-      if (currentWeek.length > 0) {
-        const startDay = currentWeek[0];
-        const endDay = currentWeek[currentWeek.length - 1];
-        weeks.push({
-          id: weeks.length + 1,
-          label: `Minggu ${weeks.length + 1} (${format(startDay, "d")} - ${format(endDay, "d MMM")})`,
-          dates: [...currentWeek],
-        });
-        currentWeek = [];
+    // Batasi hari terakhir sesuai umur bulan (misal tgl 30 atau 31)
+    const chunkEnd = Math.min(chunk.end, daysInMonth);
+    const currentWeekDays = [];
+
+    // Loop hari dari tanggal mulai sampai tanggal akhir di minggu tersebut
+    for (let i = chunk.start; i <= chunkEnd; i++) {
+      const currentDay = new Date(year, parseInt(month) - 1, i);
+      const dayOfWeek = currentDay.getDay();
+      const dateStr = format(currentDay, "yyyy-MM-dd");
+      const isHoliday = holidays.some((h) => h.date === dateStr);
+
+      // Hanya masukkan ke array Export jika itu adalah Hari Kerja & Bukan Libur Nasional
+      if (workingDays.includes(dayOfWeek) && !isHoliday) {
+        currentWeekDays.push(currentDay);
       }
     }
+
+    weeks.push({
+      id: chunk.id,
+      label: `Minggu ${chunk.id} (Tgl ${chunk.start} - ${chunkEnd})`,
+      dates: currentWeekDays,
+    });
   });
+
   return weeks;
 };
 
@@ -61,7 +71,7 @@ export default function AdminRekap() {
 
   const [selectedMonth, setSelectedMonth] = useState(format(currentDate, "MM"));
   const [selectedYear, setSelectedYear] = useState(format(currentDate, "yyyy"));
-  const [selectedWeek, setSelectedWeek] = useState(1);
+  const [selectedWeek, setSelectedWeek] = useState("all");
   const [selectedTeacher, setSelectedTeacher] = useState("all");
 
   const [teachers, setTeachers] = useState([]);
@@ -113,7 +123,7 @@ export default function AdminRekap() {
 
   // Reset filter minggu ke 1 jika ganti bulan
   useEffect(() => {
-    setSelectedWeek(1);
+    setSelectedWeek("all");
   }, [selectedMonth]);
 
   // Fetch Master Guru & Data Absen Bulanan
@@ -136,70 +146,86 @@ export default function AdminRekap() {
     fetchMasterData();
   }, [user, selectedMonth, selectedYear]);
 
-  // Kalkulasi Rekap
+  // Kalkulasi Rekap (Bulanan & Mingguan Dinamis)
   useEffect(() => {
     if (teachers.length > 0) {
       const filteredTeachers =
         selectedTeacher === "all"
           ? teachers
           : teachers.filter((t) => t.nip === selectedTeacher);
-      const targetWeek = availableWeeks.find(
-        (w) => w.id === parseInt(selectedWeek),
-      );
 
-      const rBulanan = [];
-      const rMingguan = [];
+      // Cek apakah filter minggu aktif atau "Semua"
+      const targetWeek =
+        selectedWeek === "all"
+          ? null
+          : availableWeeks.find((w) => w.id === parseInt(selectedWeek));
+
+      // Tentukan Jumlah Hari Kerja yang jadi patokan (Seminggu atau Sebulan)
+      const hariKerjaAktif = targetWeek
+        ? targetWeek.dates.length
+        : totalHariKerjaBulanIni;
+
+      const rTabel = [];
+      const rMingguan = []; // Untuk Export Excel
 
       filteredTeachers.forEach((guru) => {
         const absensiGuru = attendances.filter(
           (att) => att.user_id === guru.nip,
         );
 
-        // --- PROSES REKAP BULANAN ---
-        const totalHadir = absensiGuru.length;
-        const totalJamKerja = absensiGuru.reduce(
+        // Filter data absen HANYA untuk minggu yang dipilih (jika ada)
+        const absensiAktif = targetWeek
+          ? absensiGuru.filter((att) =>
+              targetWeek.dates.some(
+                (d) => format(d, "yyyy-MM-dd") === att.date,
+              ),
+            )
+          : absensiGuru;
+
+        // --- PROSES REKAP UNTUK TABEL LAYAR ---
+        const totalHadir = absensiAktif.length;
+        const totalJamKerjaRaw = absensiAktif.reduce(
           (sum, att) => sum + (att.total_hours || 0),
           0,
         );
 
-        // Hindari pembagian 0 jika di bulan tsb libur full
-        const persentase =
-          totalHariKerjaBulanIni === 0
-            ? 0
-            : Math.min(
-                Math.round((totalHadir / totalHariKerjaBulanIni) * 100),
-                100,
-              );
-        const tidakHadir =
-          totalHariKerjaBulanIni - totalHadir > 0
-            ? totalHariKerjaBulanIni - totalHadir
-            : 0;
+        // Target jam dinamis mengikuti pilihan minggu/bulan
+        const targetJam = hariKerjaAktif * 8;
+        const selisihJamRaw = Math.max(targetJam - totalJamKerjaRaw, 0);
 
-        rBulanan.push({
+        const kurangJam = Math.floor(selisihJamRaw);
+        const kurangMenit = Math.round((selisihJamRaw % 1) * 60);
+        const teksKekurangan =
+          selisihJamRaw > 0 ? `${kurangJam}j ${kurangMenit}m` : "Tuntas";
+
+        const persentase =
+          hariKerjaAktif === 0
+            ? 0
+            : Math.min(Math.round((totalHadir / hariKerjaAktif) * 100), 100);
+
+        const tidakHadir = Math.max(hariKerjaAktif - totalHadir, 0);
+
+        rTabel.push({
           nip: guru.nip,
           nama: guru.name,
           totalHadir,
           totalTidakHadir: tidakHadir,
-          totalJamKerja: parseFloat(totalJamKerja.toFixed(1)),
+          totalJamKerja: parseFloat(totalJamKerjaRaw.toFixed(1)),
+          teksKekurangan,
           persentase,
         });
 
-        // --- PROSES REKAP MINGGUAN (Untuk Excel) ---
+        // --- PROSES REKAP UNTUK EXCEL MINGGUAN ---
         if (targetWeek) {
-          const absensiMingguIni = absensiGuru.filter((att) => {
-            return targetWeek.dates.some(
-              (d) => format(d, "yyyy-MM-dd") === att.date,
-            );
-          });
           rMingguan.push({
             nip: guru.nip,
             nama: guru.name,
-            absensiHarian: absensiMingguIni,
+            absensiHarian: absensiAktif,
           });
         }
       });
 
-      setRekapBulanan(rBulanan.sort((a, b) => b.persentase - a.persentase));
+      setRekapBulanan(rTabel.sort((a, b) => b.persentase - a.persentase));
       setRekapMingguan(rMingguan);
     }
   }, [
@@ -241,8 +267,16 @@ export default function AdminRekap() {
           <div className="flex items-center gap-2 mt-1 text-gray-500 font-medium">
             <CalendarCheck size={16} className="text-primary" />
             <span>
-              Hari Kerja Efektif Bulan Ini:{" "}
-              <strong>{totalHariKerjaBulanIni} Hari</strong>
+              Hari Kerja Efektif (
+              {selectedWeek === "all" ? "Bulan Ini" : `Minggu ${selectedWeek}`}
+              ):{" "}
+              <strong>
+                {selectedWeek === "all"
+                  ? totalHariKerjaBulanIni
+                  : availableWeeks.find((w) => w.id === parseInt(selectedWeek))
+                      ?.dates.length || 0}{" "}
+                Hari
+              </strong>
             </span>
           </div>
         </div>
@@ -303,11 +337,14 @@ export default function AdminRekap() {
           {availableWeeks.length === 0 ? (
             <option value="">Tidak ada hari kerja</option>
           ) : (
-            availableWeeks.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.label}
-              </option>
-            ))
+            <>
+              <option value="all">Semua Minggu (Sebulan)</option>
+              {availableWeeks.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.label}
+                </option>
+              ))}
+            </>
           )}
         </select>
 
@@ -338,10 +375,14 @@ export default function AdminRekap() {
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase tracking-wider text-gray-500 font-bold">
                 <th className="p-5 text-center">No</th>
-                <th className="p-5">Nama Guru</th>
+                <th className="p-5">Nama Pegawai</th> {/* Diubah */}
                 <th className="p-5 text-center text-emerald-600">Hadir</th>
                 <th className="p-5 text-center text-red-500">Tidak Hadir</th>
                 <th className="p-5 text-center text-indigo-600">Total Jam</th>
+                <th className="p-5 text-center text-orange-500">
+                  Kekurangan Jam
+                </th>{" "}
+                {/* Kolom Baru */}
                 <th className="p-5 text-center">Persentase</th>
               </tr>
             </thead>
@@ -384,7 +425,16 @@ export default function AdminRekap() {
                       {row.totalTidakHadir}
                     </td>
                     <td className="p-5 text-center font-bold text-indigo-600">
-                      {row.totalJamKerja} J
+                      {row.totalJamKerja} Jam
+                    </td>
+                    <td
+                      className={`p-5 text-center font-bold ${
+                        row.teksKekurangan === "Tuntas"
+                          ? "text-gray-400"
+                          : "text-orange-500"
+                      }`}
+                    >
+                      {row.teksKekurangan}
                     </td>
                     <td className="p-5 text-center">
                       <span
@@ -392,8 +442,8 @@ export default function AdminRekap() {
                           row.persentase >= 80
                             ? "bg-emerald-50 text-emerald-600"
                             : row.persentase >= 50
-                              ? "bg-yellow-50 text-yellow-600"
-                              : "bg-red-50 text-red-600"
+                            ? "bg-yellow-50 text-yellow-600"
+                            : "bg-red-50 text-red-600"
                         }`}
                       >
                         {row.persentase}%

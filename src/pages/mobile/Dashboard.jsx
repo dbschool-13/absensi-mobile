@@ -64,6 +64,7 @@ export default function Dashboard() {
   const videoRef = useRef(null);
   const [stream, setStream] = useState(null);
   const [isAiLoaded, setIsAiLoaded] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
 
   useEffect(() => {
     const fetchTodayAtt = async () => {
@@ -135,7 +136,11 @@ export default function Dashboard() {
     try {
       // PERBAIKAN 1: Hapus batasan width agar iPhone bebas menggunakan resolusi aslinya
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
+        video: {
+          facingMode: "user",
+          width: { ideal: 480 }, // Resolusi diturunkan agar sangat ringan
+          frameRate: { ideal: 15, max: 20 }, // Membatasi FPS agar HP tidak ngos-ngosan
+        },
       });
       setStream(mediaStream);
 
@@ -160,6 +165,8 @@ export default function Dashboard() {
     try {
       if (!videoRef.current || !stream)
         return toast.error("Kamera belum siap.");
+
+      setIsCapturing(true);
 
       // 1. Jepret Gambar ke Canvas
       const canvas = document.createElement("canvas");
@@ -223,10 +230,12 @@ export default function Dashboard() {
         if (result) setTodayAtt((prev) => ({ ...prev, ...result }));
       }
 
-      setGlobalLoading(false);
+      // setGlobalLoading(false);
       toast.success("Absen dan verifikasi wajah berhasil!");
     } catch (error) {
       toast.error("Terjadi kesalahan saat memproses foto.");
+    } finally {
+      setIsCapturing(false);
       setGlobalLoading(false);
     }
   };
@@ -764,9 +773,21 @@ export default function Dashboard() {
               ) : (
                 <button
                   onClick={handleSaveAttendance}
-                  className="flex-1 py-3.5 rounded-2xl font-bold text-white bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/30 flex items-center justify-center gap-2 transition-all animate-[flyIn_0.3s_ease-out]"
+                  disabled={isCapturing} // Tombol mati jika sedang memproses
+                  className={`flex-1 py-3.5 rounded-2xl font-bold text-white flex items-center justify-center gap-2 transition-all ${
+                    isCapturing
+                      ? "bg-gray-400 cursor-not-allowed opacity-80"
+                      : "bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/30 animate-[flyIn_0.3s_ease-out]"
+                  }`}
                 >
-                  Simpan
+                  {isCapturing ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Memproses...
+                    </>
+                  ) : (
+                    "Simpan Absen"
+                  )}
                 </button>
               )}
             </div>

@@ -6,16 +6,28 @@ export const adminService = {
   // Ambil Statistik Hari Ini
   getDashboardStats: async (schoolId) => {
     try {
-      // 1. Hitung Total Guru di sekolah ini
+      // 1. Ambil SEMUA user berdasarkan school_id saja (Aman dari error Index Firebase)
       const qUsers = query(
         collection(db, "users"),
         where("school_id", "==", schoolId),
-        where("role", "==", "guru"),
       );
       const userSnap = await getDocs(qUsers);
-      const totalGuru = userSnap.size;
 
-      // 2. Hitung Absen Hari Ini di sekolah ini
+      // 2. Filter secara manual (Kebal terhadap huruf besar/kecil)
+      let totalPegawai = 0;
+      const validRoles = ["guru", "tendik", "kepsek"];
+
+      userSnap.forEach((doc) => {
+        const data = doc.data();
+        // Ubah role menjadi huruf kecil semua agar "Guru", "GURU", "guru" dianggap sama
+        const role = (data.role || "").toLowerCase();
+
+        if (validRoles.includes(role)) {
+          totalPegawai++;
+        }
+      });
+
+      // 3. Hitung Absen Hari Ini di sekolah ini
       const today = getTodayString();
       const qAtt = query(
         collection(db, "attendances"),
@@ -25,23 +37,24 @@ export const adminService = {
       const attSnap = await getDocs(qAtt);
       const hadir = attSnap.size;
 
-      // 3. Kalkulasi
-      const belumHadir = totalGuru - hadir;
+      // 4. Kalkulasi (Gunakan Math.max agar tidak minus)
+      const belumHadir = Math.max(totalPegawai - hadir, 0);
       const persentase =
-        totalGuru > 0 ? Math.round((hadir / totalGuru) * 100) : 0;
+        totalPegawai > 0 ? Math.round((hadir / totalPegawai) * 100) : 0;
 
-      return { totalGuru, hadir, belumHadir, persentase };
+      return { totalPegawai, hadir, belumHadir, persentase };
     } catch (error) {
       console.error("Gagal mengambil statistik:", error);
-      return { totalGuru: 0, hadir: 0, belumHadir: 0, persentase: 0 };
+      return { totalPegawai: 0, hadir: 0, belumHadir: 0, persentase: 0 };
     }
   },
 
   // 2. Ambil Daftar Guru & Kepsek di Sekolah ini
   getTeachers: async (schoolId) => {
     try {
-      const { collection, query, where, getDocs } =
-        await import("firebase/firestore");
+      const { collection, query, where, getDocs } = await import(
+        "firebase/firestore"
+      );
       // Ambil semua user di sekolah ini
       const q = query(
         collection(db, "users"),
@@ -70,8 +83,9 @@ export const adminService = {
   // 3. Ambil Data Rekap Bulanan
   getRekapData: async (schoolId, month, year) => {
     try {
-      const { collection, query, where, getDocs } =
-        await import("firebase/firestore");
+      const { collection, query, where, getDocs } = await import(
+        "firebase/firestore"
+      );
 
       // Ambil semua absensi sekolah ini
       const q = query(
@@ -112,8 +126,9 @@ export const adminService = {
   // 5. Tambah Pegawai Baru (Guru/Kepsek/Tendik)
   addTeacher: async (teacherData) => {
     try {
-      const { collection, addDoc, query, where, getDocs } =
-        await import("firebase/firestore");
+      const { collection, addDoc, query, where, getDocs } = await import(
+        "firebase/firestore"
+      );
 
       // Cek apakah NIP sudah terdaftar
       const q = query(
