@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useGeolocation } from "../../hooks/useGeolocation";
 import { calculateDistance } from "../../utils/distanceCalculator";
@@ -21,6 +21,12 @@ import {
 } from "lucide-react";
 import { format, differenceInMinutes } from "date-fns";
 import { id } from "date-fns/locale";
+import {
+  Camera,
+  CameraResultType,
+  CameraSource,
+  CameraDirection,
+} from "@capacitor/camera";
 import * as faceapi from "face-api.js";
 
 // Komponen Jam Mandiri (Hanya komponen ini yang akan merender setiap detik)
@@ -41,7 +47,7 @@ const LiveClock = () => {
 };
 
 export default function Dashboard() {
-  const { user, schoolData, setGlobalLoading } = useAuth();
+  const { user, schoolData } = useAuth();
   const {
     latitude,
     longitude,
@@ -58,13 +64,11 @@ export default function Dashboard() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState(null);
-
-  const [isCameraMode, setIsCameraMode] = useState(false);
   const [isMapReady, setIsMapReady] = useState(false);
-  const videoRef = useRef(null);
-  const [stream, setStream] = useState(null);
-  const [isAiLoaded, setIsAiLoaded] = useState(false);
+
+  const fileInputRef = useRef(null);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isAiLoaded, setIsAiLoaded] = useState(false);
 
   useEffect(() => {
     const fetchTodayAtt = async () => {
@@ -92,11 +96,10 @@ export default function Dashboard() {
   useEffect(() => {
     const loadAI = async () => {
       try {
-        // Mengambil model langsung dari CDN resmi agar dijamin 100% utuh
         const MODEL_URL =
           "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights";
         await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-        setIsAiLoaded(true); // Tandai bahwa AI siap digunakan
+        setIsAiLoaded(true);
       } catch (err) {
         console.error("Gagal memuat AI:", err);
       }
@@ -104,110 +107,99 @@ export default function Dashboard() {
     loadAI();
   }, []);
 
-  // 1. Fungsi buka modal
+  // 1. Fungsi Buka Modal
   const openModal = (type) => {
     setModalType(type);
-    setIsCameraMode(false);
     setIsModalOpen(true);
-    setIsMapReady(false); // Matikan peta dulu
-
-    // Tahan peta selama 400ms (menunggu animasi pop-up selesai) baru render
+    setIsMapReady(false);
     setTimeout(() => {
       setIsMapReady(true);
     }, 400);
   };
 
-  // 2. Fungsi tutup modal
+  // 2. Fungsi Tutup Modal
   const closeModal = () => {
     setIsModalOpen(false);
     setModalType(null);
-    setIsCameraMode(false);
     setIsMapReady(false);
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-      setStream(null);
-      if (videoRef.current) videoRef.current.srcObject = null; // Kosongkan memori video
-    }
+    if (fileInputRef.current) fileInputRef.current.value = ""; // Reset input file
   };
 
-  // 3. Fungsi mengubah modal menjadi Layar Kamera
-  const startCamera = async () => {
-    setIsCameraMode(true);
+  // 3. Fungsi Utama: Buka Kamera Native Capacitor, Validasi AI, & Simpan
+  const handleNativeCamera = async () => {
+    setIsCapturing(true); // Aktifkan loading tombol
+
     try {
-      // PERBAIKAN 1: Hapus batasan width agar iPhone bebas menggunakan resolusi aslinya
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "user",
-          width: { ideal: 480 }, // Resolusi diturunkan agar sangat ringan
-          frameRate: { ideal: 15, max: 20 }, // Membatasi FPS agar HP tidak ngos-ngosan
-        },
-      });
-      setStream(mediaStream);
-
-      // PERBAIKAN 2: Beri jeda sedikit lebih lama, lalu paksa Play!
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-          // Paksaan Play wajib untuk sistem iOS
-          videoRef.current
-            .play()
-            .catch((err) => console.log("iOS Play Error:", err));
-        }
-      }, 300);
-    } catch (error) {
-      toast.error("Izin kamera ditolak atau diblokir oleh Safari/iPhone!");
-      setIsCameraMode(false);
-    }
-  };
-
-  // 4. Fungsi memotret dan menyimpan (DIPERKETAT DENGAN AI)
-  const handleSaveAttendance = async () => {
-    try {
-      if (!videoRef.current || !stream)
-        return toast.error("Kamera belum siap.");
-
-      setIsCapturing(true);
-
-      // 1. Jepret Gambar ke Canvas
-      const canvas = document.createElement("canvas");
-      canvas.width = 500;
-      canvas.height =
-        (videoRef.current.videoHeight / videoRef.current.videoWidth) * 500;
-      const ctx = canvas.getContext("2d");
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-
-      setGlobalLoading(true);
-
-      // KUNCI PENGAMAN: Cegah pemindaian jika model AI belum selesai di-download
       if (!isAiLoaded) {
-        setGlobalLoading(false);
+        setIsCapturing(false);
         return toast.error(
-          "Sistem AI sedang disiapkan, mohon tunggu beberapa detik.",
+          "Sistem AI sedang disiapkan, mohon tunggu sebentar.",
         );
       }
 
-      // 2. SCAN WAJAH DENGAN AI (Validasi Ketat)
-      const detections = await faceapi.detectSingleFace(
-        canvas,
-        new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.5 }), // Threshold 50% kemiripan wajah manusia
-      );
+      // 1. PANGGIL KAMERA NATIVE HP (Kunci Rapat Galeri)
+      const photo = await Camera.getPhoto({
+        quality: 60,
+        allowEditing: false,
+        resultType: CameraResultType.Uri,
+        source: CameraSource.Camera,
+        saveToGallery: false,
+        direction: CameraDirection.Front,
+        width: 500,
+      });
 
-      // Jika tidak ada wajah yang ditemukan di foto!
-      if (!detections) {
-        setGlobalLoading(false);
-        return toast.error(
-          "❌ Wajah tidak terdeteksi! Pastikan wajah Anda terlihat jelas.",
-        );
+      if (!photo || !photo.webPath) {
+        setIsCapturing(false);
+        return;
       }
 
-      // 3. Jika wajah valid, convert ke Base64 dan lanjut simpan
+      // 2. PROSES GAMBAR (Pastikan termuat sempurna sebelum di-scan)
+      const imageURL = photo.webPath; // Capacitor v3+ lebih stabil menggunakan webPath langsung
+      const img = new Image();
+      img.src = imageURL;
+
+      // Tunggu hingga gambar BENAR-BENAR termuat di memori
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error("Gambar gagal dimuat"));
+      });
+
+      // 3. SCAN WAJAH DENGAN AI (Pengadilan Ketat)
+      // Hapus 'window.' dan langsung gunakan variabel 'faceapi'
+      try {
+        const detections = await faceapi.detectSingleFace(
+          img,
+          new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.65 }),
+        );
+
+        // Jika AI tidak menemukan wajah sama sekali
+        if (!detections) {
+          setIsCapturing(false);
+          return toast.error(
+            "❌ Wajah tidak terdeteksi! Pastikan Anda memfoto wajah dengan jelas.",
+          );
+        }
+      } catch (aiError) {
+        setIsCapturing(false);
+        console.error("Error saat scan AI:", aiError);
+        return toast.error("Gagal memindai wajah, harap coba lagi.");
+      }
+
+      // 4. Kompresi & Convert (Baru dijalankan JIKA Lolos Validasi AI)
+      const canvas = document.createElement("canvas");
+      const targetWidth = 500;
+      const scale = targetWidth / img.width;
+
+      canvas.width = targetWidth;
+      canvas.height = img.height * scale;
+
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       const base64PhotoURL = canvas.toDataURL("image/jpeg", 0.5);
 
       closeModal();
 
-      // (Lanjutan Simpan ke Firebase seperti biasa)
+      // 5. KIRIM DATA KE DATABASE
       if (modalType === "datang") {
         const result = await attendanceService.checkIn(
           user.nip,
@@ -230,13 +222,15 @@ export default function Dashboard() {
         if (result) setTodayAtt((prev) => ({ ...prev, ...result }));
       }
 
-      // setGlobalLoading(false);
       toast.success("Absen dan verifikasi wajah berhasil!");
     } catch (error) {
-      toast.error("Terjadi kesalahan saat memproses foto.");
+      // Hiraukan error jika user sekadar menekan tombol 'Back/Kembali' saat kamera terbuka
+      if (error.message !== "User cancelled photos app") {
+        console.error("Camera Error:", error);
+        toast.error("Terjadi kesalahan atau izin kamera ditolak.");
+      }
     } finally {
-      setIsCapturing(false);
-      setGlobalLoading(false);
+      setIsCapturing(false); // Matikan tombol loading
     }
   };
 
@@ -289,7 +283,6 @@ export default function Dashboard() {
   const hoursWorked = Math.floor(Math.max(workedMinutes, 0) / 60);
   const minsWorked = Math.max(workedMinutes, 0) % 60;
 
-  // --- TAMBAHKAN KODE INI UNTUK MENGHITUNG KEKURANGAN (SELISIH) ---
   const shortfallMinutes = Math.max(targetMinutes - workedMinutes, 0);
   const shortHours = Math.floor(shortfallMinutes / 60);
   const shortMins = shortfallMinutes % 60;
@@ -297,7 +290,6 @@ export default function Dashboard() {
   let shortText = "⚠️ Kurang ";
   if (shortHours > 0) shortText += `${shortHours}j `;
   shortText += `${shortMins}m`;
-  // ----------------------------------------------------------------
 
   const getGreeting = () => {
     const hour = currentTime.getHours();
@@ -346,11 +338,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Big Clock Area */}
         <div className="relative z-10 text-center flex flex-col items-center">
-          {/* PANGGIL KOMPONEN JAM DI SINI */}
           <LiveClock />
-
           <p className="text-sm text-indigo-100 mt-2 font-semibold tracking-wide bg-white/10 px-4 py-1.5 rounded-full backdrop-blur-sm border border-white/10">
             {format(currentTime, "EEEE, dd MMMM yyyy", { locale: id })}
           </p>
@@ -652,144 +641,96 @@ export default function Dashboard() {
               </div>
               <button
                 onClick={closeModal}
-                className="p-2 rounded-full bg-gray-50 text-gray-500 hover:bg-gray-200 transition-colors"
+                disabled={isCapturing}
+                className="p-2 rounded-full bg-gray-50 text-gray-500 hover:bg-gray-200 transition-colors disabled:opacity-50"
               >
                 <X size={20} />
               </button>
             </div>
 
             <div className="px-6 space-y-4 mt-4">
-              {!isCameraMode ? (
-                <>
-                  {/* BUNGKUSAN PETA YANG DIPERKETAT */}
-                  <div className="h-[200px] w-full bg-slate-100 rounded-[2rem] overflow-hidden relative border-4 border-white mb-4 shadow-inner">
-                    {latitude &&
-                    longitude &&
-                    schoolData?.latitude &&
-                    schoolData?.longitude &&
-                    isMapReady ? (
-                      // Inline style absolute memaksa Leaflet menghitung ukuran 100% dari parent
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                        }}
-                      >
-                        <RadiusMap
-                          key={`map-${latitude}-${longitude}-${isModalOpen}`}
-                          userLat={latitude}
-                          userLng={longitude}
-                          schoolLat={schoolData.latitude}
-                          schoolLng={schoolData.longitude}
-                          radius={schoolData.radius_meters}
-                        />
-                      </div>
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center flex-col gap-2 bg-slate-50 z-10">
-                        <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                        <span className="text-gray-400 text-[10px] font-bold animate-pulse">
-                          {!isMapReady
-                            ? "Menyesuaikan Peta..."
-                            : "Mencari GPS..."}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
+              <div className="h-[200px] w-full bg-slate-100 rounded-[2rem] overflow-hidden relative border-4 border-white mb-4 shadow-inner">
+                {latitude &&
+                longitude &&
+                schoolData?.latitude &&
+                schoolData?.longitude &&
+                isMapReady ? (
                   <div
-                    className={`p-4 rounded-[1.5rem] flex items-center justify-center gap-3 border ${
-                      isInRadius
-                        ? "bg-emerald-50 border-emerald-100 text-emerald-600"
-                        : "bg-red-50 border-red-100 text-red-600"
-                    }`}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                    }}
                   >
-                    {isInRadius ? (
-                      <CheckCircle size={22} />
-                    ) : (
-                      <AlertCircle size={22} />
-                    )}
-                    <span className="font-bold text-sm uppercase tracking-wide">
-                      {isInRadius
-                        ? `Lokasi Valid (${distance}m)`
-                        : `Di Luar Area (${distance}m)`}
+                    <RadiusMap
+                      key={`map-${latitude}-${longitude}-${isModalOpen}`}
+                      userLat={latitude}
+                      userLng={longitude}
+                      schoolLat={schoolData.latitude}
+                      schoolLng={schoolData.longitude}
+                      radius={schoolData.radius_meters}
+                    />
+                  </div>
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center flex-col gap-2 bg-slate-50 z-10">
+                    <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-gray-400 text-[10px] font-bold animate-pulse">
+                      {!isMapReady ? "Menyesuaikan Peta..." : "Mencari GPS..."}
                     </span>
                   </div>
-                </>
-              ) : (
-                <>
-                  <div className="h-[280px] w-full bg-slate-900 rounded-[2rem] overflow-hidden shadow-inner relative border-4 border-gray-100">
-                    {stream ? (
-                      <video
-                        ref={videoRef}
-                        autoPlay
-                        playsInline
-                        webkit-playsinline="true"
-                        muted
-                        className="w-full h-full object-cover transform scale-x-[-1]"
-                      ></video>
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <span className="text-gray-400 text-xs font-bold animate-pulse">
-                          Menyiapkan Kamera...
-                        </span>
-                      </div>
-                    )}
+                )}
+              </div>
 
-                    <div className="absolute inset-0 border-2 border-dashed border-white/40 rounded-[2rem] pointer-events-none m-6 opacity-70"></div>
-
-                    <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm px-2 py-1 rounded-md">
-                      <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
-                      <span className="text-[9px] font-bold text-white uppercase tracking-widest">
-                        Live
-                      </span>
-                    </div>
-                  </div>
-                  <p className="text-center text-xs text-gray-500 font-bold animate-pulse">
-                    Posisikan wajah Anda pada bingkai
-                  </p>
-                </>
-              )}
+              <div
+                className={`p-4 rounded-[1.5rem] flex items-center justify-center gap-3 border ${
+                  isInRadius
+                    ? "bg-emerald-50 border-emerald-100 text-emerald-600"
+                    : "bg-red-50 border-red-100 text-red-600"
+                }`}
+              >
+                {isInRadius ? (
+                  <CheckCircle size={22} />
+                ) : (
+                  <AlertCircle size={22} />
+                )}
+                <span className="font-bold text-sm uppercase tracking-wide">
+                  {isInRadius
+                    ? `Lokasi Valid (${distance}m)`
+                    : `Di Luar Area (${distance}m)`}
+                </span>
+              </div>
             </div>
 
             <div className="p-6 pt-2 flex gap-3">
               <button
                 onClick={closeModal}
-                className="flex-1 py-3.5 rounded-2xl font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-colors"
+                disabled={isCapturing}
+                className="flex-1 py-3.5 rounded-2xl font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-50"
               >
                 Batal
               </button>
 
-              {!isCameraMode ? (
-                <button
-                  onClick={startCamera}
-                  disabled={!isInRadius}
-                  className="flex-1 py-3.5 rounded-2xl font-bold text-white bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-primary/30 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-                >
-                  Kirim Absen
-                </button>
-              ) : (
-                <button
-                  onClick={handleSaveAttendance}
-                  disabled={isCapturing} // Tombol mati jika sedang memproses
-                  className={`flex-1 py-3.5 rounded-2xl font-bold text-white flex items-center justify-center gap-2 transition-all ${
-                    isCapturing
-                      ? "bg-gray-400 cursor-not-allowed opacity-80"
-                      : "bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-500/30 animate-[flyIn_0.3s_ease-out]"
-                  }`}
-                >
-                  {isCapturing ? (
-                    <>
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Memproses...
-                    </>
-                  ) : (
-                    "Simpan Absen"
-                  )}
-                </button>
-              )}
+              {/* TOMBOL YANG LANGSUNG MEMANGGIL CAPACITOR CAMERA */}
+              <button
+                onClick={handleNativeCamera}
+                disabled={!isInRadius || isCapturing}
+                className={`flex-1 py-3.5 rounded-2xl font-bold text-white flex items-center justify-center gap-2 transition-all shadow-lg ${
+                  isCapturing
+                    ? "bg-gray-400 cursor-not-allowed opacity-80"
+                    : "bg-primary hover:bg-primary_dark shadow-primary/30"
+                }`}
+              >
+                {isCapturing ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Memproses...
+                  </>
+                ) : (
+                  "Kirim Absen"
+                )}
+              </button>
             </div>
           </div>
         </div>
