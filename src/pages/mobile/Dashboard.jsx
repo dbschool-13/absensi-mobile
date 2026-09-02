@@ -19,8 +19,10 @@ import {
   MapPin,
   RefreshCw,
 } from "lucide-react";
-import { format, differenceInMinutes } from "date-fns";
+import { format, differenceInMinutes, startOfWeek, endOfWeek } from "date-fns";
 import { id } from "date-fns/locale";
+import { collection, query, where, getDocs } from "firebase/firestore";
+import { db } from "../../services/firebase";
 import { syncServerTime, getSecureTime } from "../../utils/secureTime";
 
 // Helper untuk memastikan waktu bisa dibaca oleh semua merek HP/iOS
@@ -68,6 +70,7 @@ export default function Dashboard() {
   // --- STATE OFFLINE MODE ---
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingSync, setPendingSync] = useState(0);
+  const [weeklyTotalPastDays, setWeeklyTotalPastDays] = useState(0);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState(null);
@@ -89,6 +92,46 @@ export default function Dashboard() {
     };
     fetchTodayAtt();
   }, [user]);
+
+  useEffect(() => {
+    const fetchWeeklyData = async () => {
+      if (!user || isOffline) return;
+      try {
+        // Ambil rentang tanggal minggu ini (Senin s/d Minggu)
+        const start = format(
+          startOfWeek(currentTime, { weekStartsOn: 1 }),
+          "yyyy-MM-dd",
+        );
+        const end = format(
+          endOfWeek(currentTime, { weekStartsOn: 1 }),
+          "yyyy-MM-dd",
+        );
+        const todayStr = format(currentTime, "yyyy-MM-dd");
+
+        const q = query(
+          collection(db, "attendances"),
+          where("user_id", "==", user.nip),
+          where("date", ">=", start),
+          where("date", "<=", end),
+        );
+
+        const snap = await getDocs(q);
+        let pastTotal = 0;
+
+        snap.forEach((doc) => {
+          const data = doc.data();
+          // Jangan hitung hari ini di pastTotal, karena hari ini dihitung LIVE
+          if (data.date !== todayStr) {
+            pastTotal += data.total_hours || 0;
+          }
+        });
+        setWeeklyTotalPastDays(pastTotal);
+      } catch (error) {
+        console.error("Gagal menarik data mingguan:", error);
+      }
+    };
+    fetchWeeklyData();
+  }, [user, isOffline]); // Akan dijalankan ulang jika user online kembali
 
   useEffect(() => {
     if (latitude && longitude && schoolData) {
@@ -337,6 +380,29 @@ export default function Dashboard() {
   if (shortHours > 0) shortText += `${shortHours}j `;
   shortText += `${shortMins}m`;
 
+  // ==========================================
+  // KALKULATOR MINGGUAN (LIVE)
+  // ==========================================
+  const targetWeeklyHours = workingDaysDef.length * 8; // Misal: 5 hari x 8 jam = 40 Jam
+  const targetWeeklyMinutes = targetWeeklyHours * 60;
+
+  // Total Menit (Data hari lalu + Live hari ini)
+  const totalWeeklyMinutesSoFar =
+    weeklyTotalPastDays * 60 + Math.max(workedMinutes, 0);
+
+  // Selisih Kekurangan
+  const weeklyDeficitMinutes = Math.max(
+    targetWeeklyMinutes - totalWeeklyMinutesSoFar,
+    0,
+  );
+  const deficitHours = Math.floor(weeklyDeficitMinutes / 60);
+  const deficitMins = Math.floor(weeklyDeficitMinutes % 60);
+
+  let weeklyBadgeText = "✅ Tercapai";
+  if (weeklyDeficitMinutes > 0) {
+    weeklyBadgeText = `Kurang ${deficitHours}j ${deficitMins}m`;
+  }
+
   const getGreeting = () => {
     const hour = currentTime.getHours();
     if (hour < 11) return "Selamat Pagi";
@@ -541,6 +607,21 @@ export default function Dashboard() {
                 ? "Durasi berjalan..."
                 : "Belum absen masuk"}
             </p>
+
+            <div className="mt-3 pt-3 border-t border-gray-100/80 flex items-center justify-between">
+              <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400">
+                Target {targetWeeklyHours} Jam
+              </span>
+              <span
+                className={`text-[10px] font-bold px-2 py-1 rounded-md transition-colors ${
+                  weeklyDeficitMinutes <= 0
+                    ? "bg-emerald-50 text-emerald-600"
+                    : "bg-orange-50 text-orange-600"
+                }`}
+              >
+                {weeklyBadgeText}
+              </span>
+            </div>
           </div>
         </div>
 
