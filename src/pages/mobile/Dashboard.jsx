@@ -1,3 +1,4 @@
+import { syncServerTime, getSecureTime } from "../../utils/secureTime";
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useGeolocation } from "../../hooks/useGeolocation";
@@ -23,15 +24,26 @@ import { format, differenceInMinutes, startOfWeek, endOfWeek } from "date-fns";
 import { id } from "date-fns/locale";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../services/firebase";
-import { syncServerTime, getSecureTime } from "../../utils/secureTime";
 
-// Helper untuk memastikan waktu bisa dibaca oleh semua merek HP/iOS
+/// Helper Anti-Error untuk semua jenis HP (iOS/Android)
 const getValidTime = (timeData) => {
   if (!timeData) return new Date();
+
   if (typeof timeData.toDate === "function") {
     return timeData.toDate();
   }
-  return new Date(timeData);
+
+  // Perbaikan bug spasi di HP Apple/Safari
+  let parsedStr = timeData;
+  if (typeof timeData === "string") {
+    parsedStr = timeData.replace(" ", "T");
+  }
+
+  const d = new Date(parsedStr);
+  // Jika browser HP gagal membaca (Invalid Date), kembalikan waktu sekarang
+  if (isNaN(d.getTime())) return new Date();
+
+  return d;
 };
 
 // Komponen Jam Mandiri
@@ -328,13 +340,12 @@ export default function Dashboard() {
     }
   };
 
-  // STATE BARU: Waktu yang di-refresh setiap menit untuk menggerakkan Progress Bar
-  const [calcTime, setCalcTime] = useState(new Date());
+  // STATE BARU: Sinkronisasi waktu menggunakan standar server
+  const [calcTime, setCalcTime] = useState(getSecureTime());
 
   useEffect(() => {
-    // Progress bar akan bergerak naik otomatis setiap 1 menit (60000 ms)
     const timer = setInterval(() => {
-      setCalcTime(new Date());
+      setCalcTime(getSecureTime()); // Gunakan secure time, jangan new Date()
     }, 60000);
     return () => clearInterval(timer);
   }, []);
@@ -369,14 +380,20 @@ export default function Dashboard() {
 
   if (hasCheckedIn) {
     const checkInDate = getValidTime(todayAtt.check_in.time);
+    let endTime = calcTime; // Default: waktu berjalan
 
     if (hasCheckedOut) {
-      const checkOutDate = getValidTime(todayAtt.check_out.time);
-
-      workedMinutes = differenceInMinutes(checkOutDate, checkInDate);
-    } else {
-      workedMinutes = differenceInMinutes(calcTime, checkInDate);
+      endTime = getValidTime(todayAtt.check_out.time);
     }
+
+    // Selisih dalam satuan Milidetik murni (Anti-NaN di HP lama)
+    let diffMs = endTime.getTime() - checkInDate.getTime();
+
+    // Mencegah angka minus jika terjadi desinkronisasi jam HP
+    if (diffMs < 0) diffMs = 0;
+
+    // Konversi milidetik ke Menit
+    workedMinutes = Math.floor(diffMs / (1000 * 60));
   }
 
   workedMinutes = Math.max(workedMinutes, 0);
