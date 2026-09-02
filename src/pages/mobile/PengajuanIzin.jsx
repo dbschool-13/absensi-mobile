@@ -37,6 +37,7 @@ export default function PengajuanIzin() {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingSync, setPendingSync] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   // 1. Fetch Riwayat & Pantau Sinyal
   useEffect(() => {
@@ -188,6 +189,14 @@ export default function PengajuanIzin() {
         toast.success(
           "📶 Offline: Pengajuan disimpan di HP. Akan dikirim otomatis saat sinyal stabil.",
         );
+
+        // Reset Form & Pindah Tab jika offline
+        setType("sakit");
+        setStartDate("");
+        setEndDate("");
+        setReason("");
+        setAttachment(null);
+        setActiveTab("riwayat");
       } else {
         // KIRIM ONLINE
         await leaveService.submitLeaveRequest(
@@ -199,22 +208,27 @@ export default function PengajuanIzin() {
           reason,
           attachment,
         );
-        toast.success("Pengajuan berhasil dikirim!");
+
+        // JIKA BERHASIL, TAMPILKAN MODAL
+        setShowSuccessModal(true);
         fetchHistory();
       }
-
-      // Reset Form
-      setType("sakit");
-      setStartDate("");
-      setEndDate("");
-      setReason("");
-      setAttachment(null);
-      setActiveTab("riwayat"); // Pindah ke tab riwayat setelah berhasil
     } catch (error) {
       toast.error("Terjadi kesalahan saat mengirim pengajuan.");
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleCloseModal = () => {
+    setShowSuccessModal(false);
+    // Reset Form
+    setType("sakit");
+    setStartDate("");
+    setEndDate("");
+    setReason("");
+    setAttachment(null);
+    setActiveTab("riwayat"); // Pindah ke tab riwayat
   };
 
   // Render Status Badge
@@ -508,6 +522,35 @@ export default function PengajuanIzin() {
           </div>
         )}
       </div>
+
+      {/* ... TAB 2: RIWAYAT ... */}
+
+      {/* MODAL SUKSES PENGAJUAN */}
+      {showSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-[2rem] p-8 w-full max-w-sm text-center shadow-2xl animate-[slideUp_0.3s_ease-out]">
+            <div className="w-20 h-20 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-5 shadow-inner">
+              <CheckCircle size={40} />
+            </div>
+
+            <h2 className="text-xl font-black text-gray-800 mb-2">
+              Pengajuan Berhasil!
+            </h2>
+
+            <p className="text-sm font-medium text-gray-500 leading-relaxed mb-8">
+              Setelah Pengajuan ini dikirim, mohon segera infokan ke{" "}
+              <strong>Wakasek Kurikulum</strong> untuk diproses pengajuannya.
+            </p>
+
+            <button
+              onClick={handleCloseModal}
+              className="w-full bg-primary hover:bg-primary_dark text-white font-bold py-4 rounded-2xl shadow-lg transition-colors"
+            >
+              Saya Mengerti
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
