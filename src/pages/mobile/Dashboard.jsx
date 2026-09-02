@@ -93,26 +93,20 @@ export default function Dashboard() {
     fetchTodayAtt();
   }, [user]);
 
+  // Mengambil dan menghitung total jam mingguan (Senin - Minggu)
   useEffect(() => {
     const fetchWeeklyData = async () => {
       if (!user || isOffline) return;
       try {
-        // Ambil rentang tanggal minggu ini (Senin s/d Minggu)
-        const start = format(
-          startOfWeek(currentTime, { weekStartsOn: 1 }),
-          "yyyy-MM-dd",
-        );
-        const end = format(
-          endOfWeek(currentTime, { weekStartsOn: 1 }),
-          "yyyy-MM-dd",
-        );
+        // 1. Tentukan awal dan akhir minggu berjalan
+        const startOfWk = startOfWeek(currentTime, { weekStartsOn: 1 });
+        const endOfWk = endOfWeek(currentTime, { weekStartsOn: 1 });
         const todayStr = format(currentTime, "yyyy-MM-dd");
 
+        // 2. Tarik SEMUA absen milik pegawai ini (lebih aman dari error index)
         const q = query(
           collection(db, "attendances"),
           where("user_id", "==", user.nip),
-          where("date", ">=", start),
-          where("date", "<=", end),
         );
 
         const snap = await getDocs(q);
@@ -120,11 +114,30 @@ export default function Dashboard() {
 
         snap.forEach((doc) => {
           const data = doc.data();
-          // Jangan hitung hari ini di pastTotal, karena hari ini dihitung LIVE
-          if (data.date !== todayStr) {
-            pastTotal += data.total_hours || 0;
+
+          if (!data.date) return; // Abaikan jika tidak ada tanggal
+
+          // Konversi tanggal Firestore ("YYYY-MM-DD") menjadi Date object
+          const docDateParts = data.date.split("-");
+          // Catatan: Bulan di Javascript dimulai dari 0 (Jan = 0)
+          const docDate = new Date(
+            docDateParts[0],
+            docDateParts[1] - 1,
+            docDateParts[2],
+          );
+
+          // 3. Filter Manual: Cek apakah absen ini ada di dalam minggu berjalan
+          const isThisWeek = docDate >= startOfWk && docDate <= endOfWk;
+
+          // 4. Pastikan kita TIDAK MENGHITUNG absen hari ini (karena hari ini dihitung Live)
+          // dan pastikan total_hours valid berupa angka
+          if (isThisWeek && data.date !== todayStr) {
+            const hours = parseFloat(data.total_hours) || 0;
+            pastTotal += hours;
           }
         });
+
+        // 5. Simpan total jam historis
         setWeeklyTotalPastDays(pastTotal);
       } catch (error) {
         console.error("Gagal menarik data mingguan:", error);
@@ -383,7 +396,7 @@ export default function Dashboard() {
   // ==========================================
   // KALKULATOR MINGGUAN (LIVE)
   // ==========================================
-  const targetWeeklyHours = workingDaysDef.length * 8; // Misal: 5 hari x 8 jam = 40 Jam
+  const targetWeeklyHours = workingDaysDef.length * 8; // Contoh: 5 x 8 = 40
   const targetWeeklyMinutes = targetWeeklyHours * 60;
 
   // Total Menit (Data hari lalu + Live hari ini)
