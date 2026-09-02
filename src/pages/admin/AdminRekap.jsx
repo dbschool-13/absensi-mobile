@@ -8,59 +8,79 @@ import {
   Search,
   CalendarCheck,
 } from "lucide-react";
-import { format, eachDayOfInterval, endOfMonth } from "date-fns";
+import { format, endOfMonth, startOfWeek, addDays } from "date-fns";
+import { id as localeId } from "date-fns/locale";
 
 import { exportToPDF } from "../../utils/exportPdf";
 import { exportToExcel } from "../../utils/exportExcel";
 
-// Fungsi Helper untuk membagi hari dalam sebulan menjadi daftar Minggu Dinamis (Blok 7 Hari Tetap)
+// ======================================================================
+// PERBAIKAN: Fungsi Helper Daftar Minggu (Berbasis Kalender Absolut)
+// ======================================================================
 const getWorkingWeeks = (
   month,
   year,
   workingDays = [1, 2, 3, 4, 5],
   holidays = [],
 ) => {
-  const start = new Date(year, parseInt(month) - 1, 1);
-  const daysInMonth = endOfMonth(start).getDate();
-
   const weeks = [];
 
-  // Format Standar Laporan Mingguan Instansi (Blok 7 Harian)
-  const chunkRanges = [
-    { id: 1, start: 1, end: 7 },
-    { id: 2, start: 8, end: 14 },
-    { id: 3, start: 15, end: 21 },
-    { id: 4, start: 22, end: 28 },
-    { id: 5, start: 29, end: 31 }, // Akan terpotong otomatis sesuai umur bulan
-  ];
+  // 1. Tentukan tanggal 1 bulan ini
+  const firstDayOfMonth = new Date(year, parseInt(month) - 1, 1);
+  const daysInMonth = endOfMonth(firstDayOfMonth).getDate();
 
-  chunkRanges.forEach((chunk) => {
-    // Lewati Minggu ke-5 jika bulan tersebut hanya sampai tanggal 28 (misal Februari)
-    if (chunk.start > daysInMonth) return;
+  // 2. Tentukan HARI SENIN pertama untuk bulan ini
+  // (meskipun Senin tersebut jatuh di akhir bulan lalu)
+  let currentMonday = startOfWeek(firstDayOfMonth, { weekStartsOn: 1 });
 
-    // Batasi hari terakhir sesuai umur bulan (misal tgl 30 atau 31)
-    const chunkEnd = Math.min(chunk.end, daysInMonth);
+  let weekId = 1;
+
+  // 3. Loop terus selama Senin tersebut masih menempel dengan bulan ini
+  // Kita berhenti jika Senin sudah melewati batas akhir bulan
+  while (
+    (currentMonday.getMonth() <= parseInt(month) - 1 &&
+      currentMonday.getFullYear() == year) ||
+    weekId === 1
+  ) {
+    // Cekam khusus untuk mencegah loop di tahun yg sama tapi bulan depan
+    if (weekId > 1 && currentMonday.getMonth() !== parseInt(month) - 1) {
+      break;
+    }
+
     const currentWeekDays = [];
+    const weekStartLabel = currentMonday.getDate();
+    let weekEndLabel = currentMonday.getDate();
 
-    // Loop hari dari tanggal mulai sampai tanggal akhir di minggu tersebut
-    for (let i = chunk.start; i <= chunkEnd; i++) {
-      const currentDay = new Date(year, parseInt(month) - 1, i);
-      const dayOfWeek = currentDay.getDay();
+    // 4. Susun array 7 hari (Senin s/d Minggu) untuk minggu tersebut
+    for (let i = 0; i < 7; i++) {
+      const currentDay = addDays(currentMonday, i);
+      const dayOfWeek = currentDay.getDay(); // 0 = Minggu, 1 = Senin
       const dateStr = format(currentDay, "yyyy-MM-dd");
       const isHoliday = holidays.some((h) => h.date === dateStr);
 
-      // Hanya masukkan ke array Export jika itu adalah Hari Kerja & Bukan Libur Nasional
+      // 5. Masukkan ke daftar JIKA: hari kerja aktif DAN bukan libur
       if (workingDays.includes(dayOfWeek) && !isHoliday) {
         currentWeekDays.push(currentDay);
+        weekEndLabel = currentDay.getDate(); // Simpan tanggal kerja terakhir untuk label
       }
     }
 
-    weeks.push({
-      id: chunk.id,
-      label: `Minggu ${chunk.id} (Tgl ${chunk.start} - ${chunkEnd})`,
-      dates: currentWeekDays,
-    });
-  });
+    // 6. Masukkan minggu ini ke array hasil (jika ada hari kerjanya)
+    if (currentWeekDays.length > 0) {
+      weeks.push({
+        id: weekId,
+        label: `Minggu ${weekId} (${format(
+          currentWeekDays[0],
+          "d MMM",
+        )} - ${format(currentWeekDays[currentWeekDays.length - 1], "d MMM")})`,
+        dates: currentWeekDays,
+      });
+    }
+
+    // 7. Geser ke Senin minggu depannya
+    currentMonday = addDays(currentMonday, 7);
+    weekId++;
+  }
 
   return weeks;
 };
@@ -126,25 +146,46 @@ export default function AdminRekap() {
     setSelectedWeek("all");
   }, [selectedMonth]);
 
-  // Fetch Master Guru & Data Absen Bulanan
+  // Fetch Master Guru & Data Absen Bulanan (Mendukung Lintas Bulan)
   useEffect(() => {
     const fetchMasterData = async () => {
-      if (user?.school_id) {
+      if (user?.school_id && availableWeeks.length > 0) {
+        setLoading(true);
+
+        // 1. Ambil data guru
         setTeachers(await adminService.getTeachers(user.school_id));
 
-        setLoading(true);
-        setAttendances(
-          await adminService.getRekapData(
-            user.school_id,
-            selectedMonth,
-            selectedYear,
+        // 2. Deteksi bulan & tahun apa saja yang "tersentuh" oleh kalender minggu ini
+        // Contoh output: ["08-2026", "09-2026"]
+        const uniqueMonthsYears = [
+          ...new Set(
+            availableWeeks.flatMap((w) =>
+              w.dates.map((d) => format(d, "MM-yyyy")),
+            ),
           ),
+        ];
+
+        let combinedAttendances = [];
+
+        // 3. Unduh data absen untuk SETIAP bulan yang terlibat secara berurutan
+        for (const monthYear of uniqueMonthsYears) {
+          const [m, y] = monthYear.split("-");
+          const data = await adminService.getRekapData(user.school_id, m, y);
+          combinedAttendances = [...combinedAttendances, ...data];
+        }
+
+        // 4. Saring duplikat (untuk berjaga-jaga jika ada ID dokumen yang sama)
+        const uniqueAttendances = Array.from(
+          new Map(combinedAttendances.map((item) => [item.id, item])).values(),
         );
+
+        setAttendances(uniqueAttendances);
         setLoading(false);
       }
     };
+
     fetchMasterData();
-  }, [user, selectedMonth, selectedYear]);
+  }, [user, availableWeeks]); // Berubah otomatis mengikuti kalender (bukan hanya dropdown bulan)
 
   // Kalkulasi Rekap (Bulanan & Mingguan Dinamis)
   useEffect(() => {
@@ -382,7 +423,6 @@ export default function AdminRekap() {
                 <th className="p-5 text-center text-orange-500">
                   Kekurangan Jam
                 </th>
-                {/* Kolom Baru */}
                 <th className="p-5 text-center">Persentase</th>
               </tr>
             </thead>
@@ -390,7 +430,7 @@ export default function AdminRekap() {
               {loading ? (
                 <tr>
                   <td
-                    colSpan="6"
+                    colSpan="7"
                     className="p-8 text-center text-gray-400 font-medium"
                   >
                     Memuat data...
@@ -399,7 +439,7 @@ export default function AdminRekap() {
               ) : rekapBulanan.length === 0 ? (
                 <tr>
                   <td
-                    colSpan="6"
+                    colSpan="7"
                     className="p-8 text-center text-gray-400 font-medium"
                   >
                     Tidak ada data rekap untuk periode ini.
