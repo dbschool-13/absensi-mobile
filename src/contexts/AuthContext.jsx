@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { db } from "../services/firebase";
+import { Device } from "@capacitor/device";
 import {
   collection,
   query,
@@ -21,17 +22,23 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [isGlobalLoading, setGlobalLoading] = useState(false);
 
-  // Fungsi Helper: Generate / Ambil ID Perangkat
-  const getLocalDeviceId = () => {
-    let deviceId = localStorage.getItem("app_device_id");
-    if (!deviceId) {
-      deviceId =
-        "dev_" +
-        Math.random().toString(36).substr(2, 9) +
-        Date.now().toString(36);
-      localStorage.setItem("app_device_id", deviceId);
+  // Fungsi Helper: Ambil ID Unik Hardware
+  const getHardwareDeviceId = async () => {
+    try {
+      const info = await Device.getId();
+      return info.identifier; // Ini akan mengembalikan UUID permanen dari Android/iOS
+    } catch (error) {
+      // Fallback jika dijalankan di Web Browser (Chrome/Safari)
+      let webId = localStorage.getItem("app_device_id");
+      if (!webId) {
+        webId =
+          "web_" +
+          Math.random().toString(36).substr(2, 9) +
+          Date.now().toString(36);
+        localStorage.setItem("app_device_id", webId);
+      }
+      return webId;
     }
-    return deviceId;
   };
 
   const fetchSchoolData = async (schoolId) => {
@@ -84,7 +91,7 @@ export const AuthProvider = ({ children }) => {
           const schoolConfig = schoolSnap.data();
 
           if (schoolConfig?.enable_device_binding) {
-            const localDeviceId = getLocalDeviceId();
+            const localDeviceId = await getHardwareDeviceId(); // <- Tambahkan AWAIT
 
             // Aturan 1: Jika AKUN ini sudah terikat dengan HP lain
             if (userData.device_id && userData.device_id !== localDeviceId) {

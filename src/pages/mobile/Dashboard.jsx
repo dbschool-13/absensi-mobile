@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useGeolocation } from "../../hooks/useGeolocation";
 import { calculateDistance } from "../../utils/distanceCalculator";
@@ -21,15 +21,8 @@ import {
 } from "lucide-react";
 import { format, differenceInMinutes } from "date-fns";
 import { id } from "date-fns/locale";
-import {
-  Camera,
-  CameraResultType,
-  CameraSource,
-  CameraDirection,
-} from "@capacitor/camera";
-import * as faceapi from "face-api.js";
 
-// Komponen Jam Mandiri (Hanya komponen ini yang akan merender setiap detik)
+// Komponen Jam Mandiri
 const LiveClock = () => {
   const [time, setTime] = useState(new Date());
   useEffect(() => {
@@ -47,7 +40,7 @@ const LiveClock = () => {
 };
 
 export default function Dashboard() {
-  const { user, schoolData } = useAuth();
+  const { user, schoolData, setGlobalLoading } = useAuth();
   const {
     latitude,
     longitude,
@@ -62,13 +55,14 @@ export default function Dashboard() {
   const currentTime = new Date();
   const [todayAtt, setTodayAtt] = useState(null);
 
+  // --- STATE OFFLINE MODE ---
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [pendingSync, setPendingSync] = useState(0);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState(null);
   const [isMapReady, setIsMapReady] = useState(false);
-
-  const fileInputRef = useRef(null);
-  const [isCapturing, setIsCapturing] = useState(false);
-  const [isAiLoaded, setIsAiLoaded] = useState(false);
+  const [isSaving, setIsSaving] = useState(false); // Mengganti isCapturing
 
   useEffect(() => {
     const fetchTodayAtt = async () => {
@@ -93,19 +87,90 @@ export default function Dashboard() {
     }
   }, [latitude, longitude, schoolData]);
 
+  // Sensor Internet & Auto-Sync
   useEffect(() => {
-    const loadAI = async () => {
-      try {
-        const MODEL_URL =
-          "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights";
-        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-        setIsAiLoaded(true);
-      } catch (err) {
-        console.error("Gagal memuat AI:", err);
-      }
+    const checkQueue = () => {
+      const queue = JSON.parse(
+        localStorage.getItem("offline_attendance") || "[]",
+      );
+      setPendingSync(queue.length);
     };
-    loadAI();
+    checkQueue();
+
+    const handleOnline = () => {
+      setIsOffline(false);
+      toast.success("Koneksi pulih! Menyinkronkan data...");
+      syncOfflineData();
+    };
+
+    const handleOffline = () => {
+      setIsOffline(true);
+      toast.error("Koneksi terputus! Beralih ke Mode Offline.", { icon: "📡" });
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
   }, []);
+
+  // Fungsi Eksekutor Antrean Offline (Tanpa Foto)
+  const syncOfflineData = async () => {
+    const queue = JSON.parse(
+      localStorage.getItem("offline_attendance") || "[]",
+    );
+    if (queue.length === 0) return;
+
+    setGlobalLoading(true);
+    let successCount = 0;
+    let newQueue = [...queue];
+
+    for (let i = 0; i < queue.length; i++) {
+      const data = queue[i];
+      try {
+        if (data.type === "datang") {
+          await attendanceService.checkIn(
+            data.nip,
+            data.school_id,
+            data.lat,
+            data.lng,
+            data.distance,
+            null, // Parameter foto dikosongkan
+            data.timestamp,
+          );
+        } else {
+          await attendanceService.checkOut(
+            data.nip,
+            data.lat,
+            data.lng,
+            data.distance,
+            data.checkInTime,
+            null, // Parameter foto dikosongkan
+            data.timestamp,
+          );
+        }
+        newQueue = newQueue.filter((item) => item.id !== data.id);
+        successCount++;
+      } catch (error) {
+        console.error("Gagal sinkron data ID:", data.id);
+      }
+    }
+
+    localStorage.setItem("offline_attendance", JSON.stringify(newQueue));
+    setPendingSync(newQueue.length);
+    setGlobalLoading(false);
+
+    if (successCount > 0) {
+      toast.success(
+        `${successCount} data absen offline berhasil dikirim ke server!`,
+      );
+      const attData = await attendanceService.getTodayAttendance(user.nip);
+      setTodayAtt(attData);
+    }
+  };
 
   // 1. Fungsi Buka Modal
   const openModal = (type) => {
@@ -122,115 +187,72 @@ export default function Dashboard() {
     setIsModalOpen(false);
     setModalType(null);
     setIsMapReady(false);
-    if (fileInputRef.current) fileInputRef.current.value = ""; // Reset input file
   };
 
-  // 3. Fungsi Utama: Buka Kamera Native Capacitor, Validasi AI, & Simpan
-  const handleNativeCamera = async () => {
-    setIsCapturing(true); // Aktifkan loading tombol
-
+  // 3. Fungsi Simpan Absensi (Tanpa Kamera/Selfie)
+  const handleSaveAttendance = async () => {
+    setIsSaving(true);
     try {
-      if (!isAiLoaded) {
-        setIsCapturing(false);
-        return toast.error(
-          "Sistem AI sedang disiapkan, mohon tunggu sebentar.",
+      const timestampAsli = new Date().toISOString();
+
+      if (isOffline) {
+        // --- MODE OFFLINE ---
+        const attendancePayload = {
+          id: Date.now().toString(),
+          type: modalType,
+          nip: user.nip,
+          school_id: user.school_id,
+          lat: latitude,
+          lng: longitude,
+          distance: distance,
+          timestamp: timestampAsli,
+          checkInTime: todayAtt?.check_in?.time || null,
+        };
+
+        const queue = JSON.parse(
+          localStorage.getItem("offline_attendance") || "[]",
         );
-      }
+        queue.push(attendancePayload);
+        localStorage.setItem("offline_attendance", JSON.stringify(queue));
 
-      // 1. PANGGIL KAMERA NATIVE HP (Kunci Rapat Galeri)
-      const photo = await Camera.getPhoto({
-        quality: 60,
-        allowEditing: false,
-        resultType: CameraResultType.Uri,
-        source: CameraSource.Camera,
-        saveToGallery: false,
-        direction: CameraDirection.Front,
-        width: 500,
-      });
-
-      if (!photo || !photo.webPath) {
-        setIsCapturing(false);
-        return;
-      }
-
-      // 2. PROSES GAMBAR (Pastikan termuat sempurna sebelum di-scan)
-      const imageURL = photo.webPath; // Capacitor v3+ lebih stabil menggunakan webPath langsung
-      const img = new Image();
-      img.src = imageURL;
-
-      // Tunggu hingga gambar BENAR-BENAR termuat di memori
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = () => reject(new Error("Gambar gagal dimuat"));
-      });
-
-      // 3. SCAN WAJAH DENGAN AI (Pengadilan Ketat)
-      // Hapus 'window.' dan langsung gunakan variabel 'faceapi'
-      try {
-        const detections = await faceapi.detectSingleFace(
-          img,
-          new faceapi.TinyFaceDetectorOptions({ scoreThreshold: 0.65 }),
+        setPendingSync(queue.length);
+        toast.success(
+          "📶 Koneksi kurang stabil/offline. Absen akan dikirim otomatis saat koneksi stabil.",
         );
-
-        // Jika AI tidak menemukan wajah sama sekali
-        if (!detections) {
-          setIsCapturing(false);
-          return toast.error(
-            "❌ Wajah tidak terdeteksi! Pastikan Anda memfoto wajah dengan jelas.",
+      } else {
+        // --- MODE ONLINE ---
+        if (modalType === "datang") {
+          const result = await attendanceService.checkIn(
+            user.nip,
+            user.school_id,
+            latitude,
+            longitude,
+            distance,
+            null, // Kirim null untuk foto
+            timestampAsli,
           );
+          if (result) setTodayAtt({ ...todayAtt, ...result });
+        } else if (modalType === "pulang") {
+          const result = await attendanceService.checkOut(
+            user.nip,
+            latitude,
+            longitude,
+            distance,
+            todayAtt.check_in.time,
+            null, // Kirim null untuk foto
+            timestampAsli,
+          );
+          if (result) setTodayAtt((prev) => ({ ...prev, ...result }));
         }
-      } catch (aiError) {
-        setIsCapturing(false);
-        console.error("Error saat scan AI:", aiError);
-        return toast.error("Gagal memindai wajah, harap coba lagi.");
+        // toast.success("Absen berhasil disimpan!");
       }
-
-      // 4. Kompresi & Convert (Baru dijalankan JIKA Lolos Validasi AI)
-      const canvas = document.createElement("canvas");
-      const targetWidth = 500;
-      const scale = targetWidth / img.width;
-
-      canvas.width = targetWidth;
-      canvas.height = img.height * scale;
-
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      const base64PhotoURL = canvas.toDataURL("image/jpeg", 0.5);
 
       closeModal();
-
-      // 5. KIRIM DATA KE DATABASE
-      if (modalType === "datang") {
-        const result = await attendanceService.checkIn(
-          user.nip,
-          user.school_id,
-          latitude,
-          longitude,
-          distance,
-          base64PhotoURL,
-        );
-        if (result) setTodayAtt({ ...todayAtt, ...result });
-      } else if (modalType === "pulang") {
-        const result = await attendanceService.checkOut(
-          user.nip,
-          latitude,
-          longitude,
-          distance,
-          todayAtt.check_in.time,
-          base64PhotoURL,
-        );
-        if (result) setTodayAtt((prev) => ({ ...prev, ...result }));
-      }
-
-      toast.success("Absen dan verifikasi wajah berhasil!");
     } catch (error) {
-      // Hiraukan error jika user sekadar menekan tombol 'Back/Kembali' saat kamera terbuka
-      if (error.message !== "User cancelled photos app") {
-        console.error("Camera Error:", error);
-        toast.error("Terjadi kesalahan atau izin kamera ditolak.");
-      }
+      console.error("Error saving attendance:", error);
+      toast.error("Terjadi kesalahan saat menyimpan absen.");
     } finally {
-      setIsCapturing(false); // Matikan tombol loading
+      setIsSaving(false);
     }
   };
 
@@ -344,6 +366,14 @@ export default function Dashboard() {
             {format(currentTime, "EEEE, dd MMMM yyyy", { locale: id })}
           </p>
         </div>
+
+        {/* Indikator Offline Sync */}
+        {pendingSync > 0 && (
+          <div className="absolute top-6 right-6 bg-orange-500 text-white px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg flex items-center gap-1.5 animate-pulse z-20">
+            <RefreshCw size={12} className={isOffline ? "" : "animate-spin"} />
+            {pendingSync} Menunggu Sinyal
+          </div>
+        )}
       </div>
 
       <div className="-mt-14 mx-5 space-y-5 relative z-20">
@@ -641,7 +671,7 @@ export default function Dashboard() {
               </div>
               <button
                 onClick={closeModal}
-                disabled={isCapturing}
+                disabled={isSaving}
                 className="p-2 rounded-full bg-gray-50 text-gray-500 hover:bg-gray-200 transition-colors disabled:opacity-50"
               >
                 <X size={20} />
@@ -706,26 +736,25 @@ export default function Dashboard() {
             <div className="p-6 pt-2 flex gap-3">
               <button
                 onClick={closeModal}
-                disabled={isCapturing}
+                disabled={isSaving}
                 className="flex-1 py-3.5 rounded-2xl font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-50"
               >
                 Batal
               </button>
 
-              {/* TOMBOL YANG LANGSUNG MEMANGGIL CAPACITOR CAMERA */}
               <button
-                onClick={handleNativeCamera}
-                disabled={!isInRadius || isCapturing}
+                onClick={handleSaveAttendance}
+                disabled={!isInRadius || isSaving}
                 className={`flex-1 py-3.5 rounded-2xl font-bold text-white flex items-center justify-center gap-2 transition-all shadow-lg ${
-                  isCapturing
+                  isSaving
                     ? "bg-gray-400 cursor-not-allowed opacity-80"
-                    : "bg-primary hover:bg-primary_dark shadow-primary/30"
+                    : "bg-emerald-500 hover:bg-emerald-600 shadow-primary/30"
                 }`}
               >
-                {isCapturing ? (
+                {isSaving ? (
                   <>
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Memproses...
+                    Menyimpan...
                   </>
                 ) : (
                   "Kirim Absen"
