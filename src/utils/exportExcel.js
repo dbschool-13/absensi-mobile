@@ -3,6 +3,15 @@ import { saveAs } from "file-saver";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
 
+// Helper untuk membaca waktu dari Firebase Timestamp ATAU ISO String (Suntikan Izin)
+const getValidTime = (timeData) => {
+  if (!timeData) return null;
+  if (typeof timeData.toDate === "function") {
+    return timeData.toDate(); // Kembalikan objek Date asli
+  }
+  return new Date(timeData); // Konversi string ISO ke objek Date
+};
+
 export const exportToExcel = async (
   rekapMingguan,
   weekDates,
@@ -124,24 +133,42 @@ export const exportToExcel = async (
       cellPulang.value = "-";
 
       if (absenHariIni) {
-        // Cek status target (Hijau jika memenuhi, Merah jika tidak)
-        const isTargetMet = absenHariIni.status === "Memenuhi Target";
-        const colorArg = isTargetMet ? "FF008000" : "FFFF0000"; // Hijau : Merah
+        // Cek status target ATAU jika itu izin/sakit (kuning/oranye)
+        const isTargetMet =
+          absenHariIni.status === "Memenuhi Target" ||
+          absenHariIni.total_hours >= 8;
+        const isLeave = absenHariIni.is_leave;
+
+        let colorArg = "FFFF0000"; // Default Merah
+
+        if (isLeave) {
+          colorArg = "FFFFA500"; // Oranye jika Izin/Sakit/Cuti
+        } else if (isTargetMet) {
+          colorArg = "FF008000"; // Hijau jika Hadir Normal
+        }
 
         cellDatang.font = { color: { argb: colorArg }, bold: true };
         cellPulang.font = { color: { argb: colorArg }, bold: true };
 
+        // ==========================================
+        // PERBAIKAN: GUNAKAN getValidTime()
+        // ==========================================
         if (absenHariIni.check_in?.time) {
-          cellDatang.value = format(
-            absenHariIni.check_in.time.toDate(),
-            "HH:mm",
-          );
+          const jamMasukValid = getValidTime(absenHariIni.check_in.time);
+          if (jamMasukValid) {
+            cellDatang.value = isLeave
+              ? absenHariIni.status.toUpperCase()
+              : format(jamMasukValid, "HH:mm");
+          }
         }
+
         if (absenHariIni.check_out?.time) {
-          cellPulang.value = format(
-            absenHariIni.check_out.time.toDate(),
-            "HH:mm",
-          );
+          const jamPulangValid = getValidTime(absenHariIni.check_out.time);
+          if (jamPulangValid) {
+            cellPulang.value = isLeave
+              ? absenHariIni.status.toUpperCase()
+              : format(jamPulangValid, "HH:mm");
+          }
         }
 
         totalJamKerja += absenHariIni.total_hours || 0;

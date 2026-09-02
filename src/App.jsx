@@ -15,6 +15,7 @@ import Dashboard from "./pages/mobile/Dashboard";
 import Riwayat from "./pages/mobile/Riwayat";
 import KepsekMonitoring from "./pages/mobile/KepsekMonitoring";
 import Profil from "./pages/mobile/Profil";
+import PengajuanIzin from "./pages/mobile/PengajuanIzin";
 
 // Admin Pages
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -22,6 +23,7 @@ import AdminRekap from "./pages/admin/AdminRekap";
 import AdminGuru from "./pages/admin/AdminGuru";
 import AdminSetting from "./pages/admin/AdminSetting";
 import AdminMonitoring from "./pages/admin/AdminMonitoring";
+import AdminApproval from "./pages/admin/AdminApproval";
 
 import { SplashScreen } from "@capacitor/splash-screen";
 import { Capacitor } from "@capacitor/core";
@@ -96,6 +98,7 @@ function AppRoutes() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/riwayat" element={<Riwayat />} />
           <Route path="/profil" element={<Profil />} />
+          <Route path="/pengajuan-izin" element={<PengajuanIzin />} />
           {/* Tambahkan rute pantau untuk kepsek */}
           <Route path="/pantau" element={<KepsekMonitoring />} />
         </Route>
@@ -117,6 +120,7 @@ function AppRoutes() {
           <Route path="rekap" element={<AdminRekap />} />
           <Route path="guru" element={<AdminGuru />} />
           <Route path="setting" element={<AdminSetting />} />{" "}
+          <Route path="verifikasi-izin" element={<AdminApproval />} />
           {/* <--- TAMBAHKAN INI */}
         </Route>
 

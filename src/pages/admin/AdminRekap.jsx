@@ -375,13 +375,13 @@ export default function AdminRekap() {
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-xs uppercase tracking-wider text-gray-500 font-bold">
                 <th className="p-5 text-center">No</th>
-                <th className="p-5">Nama Pegawai</th> {/* Diubah */}
+                <th className="p-5">Nama Pegawai</th>
                 <th className="p-5 text-center text-emerald-600">Hadir</th>
                 <th className="p-5 text-center text-red-500">Tidak Hadir</th>
                 <th className="p-5 text-center text-indigo-600">Total Jam</th>
                 <th className="p-5 text-center text-orange-500">
                   Kekurangan Jam
-                </th>{" "}
+                </th>
                 {/* Kolom Baru */}
                 <th className="p-5 text-center">Persentase</th>
               </tr>

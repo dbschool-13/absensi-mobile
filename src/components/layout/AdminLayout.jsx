@@ -74,6 +74,9 @@ export default function AdminLayout() {
           <NavLink to="/admin/guru" className={navItemClass}>
             <Users size={20} /> Data Guru
           </NavLink>
+          <NavLink to="/admin/verifikasi-izin" className={navItemClass}>
+            <Users size={20} /> Approve Pengajuan
+          </NavLink>
         </nav>
 
         {/* Profil & Logout Admin */}

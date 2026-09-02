@@ -21,12 +21,22 @@ import {
 } from "lucide-react";
 import { format, differenceInMinutes } from "date-fns";
 import { id } from "date-fns/locale";
+import { syncServerTime, getSecureTime } from "../../utils/secureTime";
+
+// Helper untuk memastikan waktu bisa dibaca oleh semua merek HP/iOS
+const getValidTime = (timeData) => {
+  if (!timeData) return new Date();
+  if (typeof timeData.toDate === "function") {
+    return timeData.toDate();
+  }
+  return new Date(timeData);
+};
 
 // Komponen Jam Mandiri
 const LiveClock = () => {
-  const [time, setTime] = useState(new Date());
+  const [time, setTime] = useState(getSecureTime()); // Gunakan getSecureTime
   useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000);
+    const timer = setInterval(() => setTime(getSecureTime()), 1000); // Gunakan getSecureTime
     return () => clearInterval(timer);
   }, []);
   return (
@@ -52,7 +62,7 @@ export default function Dashboard() {
   const [distance, setDistance] = useState(null);
   const [isInRadius, setIsInRadius] = useState(false);
 
-  const currentTime = new Date();
+  const currentTime = getSecureTime();
   const [todayAtt, setTodayAtt] = useState(null);
 
   // --- STATE OFFLINE MODE ---
@@ -66,6 +76,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     const fetchTodayAtt = async () => {
+      // 1. Sinkronkan waktu global dulu saat aplikasi dibuka
+      if (navigator.onLine) {
+        await syncServerTime();
+      }
+
+      // 2. Lanjut ambil data absen (Sisa kode Anda)
       if (user) {
         const attData = await attendanceService.getTodayAttendance(user.nip);
         setTodayAtt(attData);
@@ -193,7 +209,7 @@ export default function Dashboard() {
   const handleSaveAttendance = async () => {
     setIsSaving(true);
     try {
-      const timestampAsli = new Date().toISOString();
+      const timestampAsli = getSecureTime().toISOString();
 
       if (isOffline) {
         // --- MODE OFFLINE ---
@@ -256,6 +272,17 @@ export default function Dashboard() {
     }
   };
 
+  // STATE BARU: Waktu yang di-refresh setiap menit untuk menggerakkan Progress Bar
+  const [calcTime, setCalcTime] = useState(new Date());
+
+  useEffect(() => {
+    // Progress bar akan bergerak naik otomatis setiap 1 menit (60000 ms)
+    const timer = setInterval(() => {
+      setCalcTime(new Date());
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
+
   const hasCheckedIn = !!todayAtt?.check_in;
   const hasCheckedOut = !!todayAtt?.check_out;
 
@@ -285,25 +312,22 @@ export default function Dashboard() {
   let workedMinutes = 0;
 
   if (hasCheckedIn) {
-    const checkInDate = todayAtt.check_in.time?.toDate
-      ? todayAtt.check_in.time.toDate()
-      : new Date(todayAtt.check_in.time);
+    const checkInDate = getValidTime(todayAtt.check_in.time);
+
     if (hasCheckedOut) {
-      const checkOutDate = todayAtt.check_out.time?.toDate
-        ? todayAtt.check_out.time.toDate()
-        : new Date(todayAtt.check_out.time);
+      const checkOutDate = getValidTime(todayAtt.check_out.time);
+
       workedMinutes = differenceInMinutes(checkOutDate, checkInDate);
     } else {
-      workedMinutes = differenceInMinutes(currentTime, checkInDate);
+      workedMinutes = differenceInMinutes(calcTime, checkInDate);
     }
   }
 
-  const progressPercent = Math.min(
-    Math.max((workedMinutes / targetMinutes) * 100, 0),
-    100,
-  );
-  const hoursWorked = Math.floor(Math.max(workedMinutes, 0) / 60);
-  const minsWorked = Math.max(workedMinutes, 0) % 60;
+  workedMinutes = Math.max(workedMinutes, 0);
+
+  const progressPercent = Math.min((workedMinutes / targetMinutes) * 100, 100);
+  const hoursWorked = Math.floor(workedMinutes / 60);
+  const minsWorked = workedMinutes % 60;
 
   const shortfallMinutes = Math.max(targetMinutes - workedMinutes, 0);
   const shortHours = Math.floor(shortfallMinutes / 60);

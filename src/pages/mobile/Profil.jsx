@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import {
   User,
@@ -8,12 +9,14 @@ import {
   ChevronRight,
   ShieldCheck,
   Info,
+  FileText,
 } from "lucide-react";
 import { db } from "../../services/firebase";
 import { doc, getDoc } from "firebase/firestore";
 
 export default function Profil() {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [schoolName, setSchoolName] = useState("Memuat data...");
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
@@ -110,6 +113,26 @@ export default function Profil() {
         </div>
 
         <div className="bg-white rounded-3xl shadow-xl shadow-gray-200/50 p-2 border border-gray-100">
+          {/* TOMBOL MENU PENGAJUAN IZIN */}
+          <button
+            onClick={() => navigate("/pengajuan-izin")}
+            className="w-full bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between active:scale-95 transition-transform"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-500 flex items-center justify-center">
+                <FileText size={22} />
+              </div>
+              <div className="text-left">
+                <h3 className="font-bold text-gray-800 text-sm">
+                  Pengajuan Izin
+                </h3>
+                <p className="text-[11px] text-gray-400 font-medium mt-0.5">
+                  Sakit, Izin, atau Cuti
+                </p>
+              </div>
+            </div>
+            <ChevronRight size={20} className="text-gray-300" />
+          </button>
           <button className="w-full p-4 flex items-center justify-between border-b border-gray-50 active:bg-gray-50 transition-colors rounded-t-2xl">
             <div className="flex items-center gap-4">
               <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-500">

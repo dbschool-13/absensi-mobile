@@ -7,6 +7,17 @@ import { format } from "date-fns";
 import { id } from "date-fns/locale";
 import { Users, CheckCircle2, XCircle, Clock } from "lucide-react";
 
+// Helper untuk membaca waktu dari Firebase Timestamp ATAU ISO String (Suntikan Izin)
+const getValidTime = (timeData) => {
+  if (!timeData) return 0;
+  // Jika formatnya Timestamp dari Firebase
+  if (typeof timeData.toDate === "function") {
+    return timeData.toDate().getTime();
+  }
+  // Jika formatnya String ISO dari sistem suntik absen
+  return new Date(timeData).getTime();
+};
+
 export default function AdminMonitoring() {
   const { user } = useAuth();
 
@@ -67,8 +78,13 @@ export default function AdminMonitoring() {
       if (aHadir && !bHadir) return -1;
       if (!aHadir && bHadir) return 1;
 
+      // ==========================================
+      // PERBAIKAN: GUNAKAN getValidTime DI SINI
+      // ==========================================
       if (aHadir && bHadir) {
-        return b.absen.check_in.time.toDate() - a.absen.check_in.time.toDate();
+        const timeA = getValidTime(a.absen.check_in.time);
+        const timeB = getValidTime(b.absen.check_in.time);
+        return timeB - timeA;
       }
       return a.name.localeCompare(b.name);
     });
@@ -181,6 +197,9 @@ export default function AdminMonitoring() {
                     data.absen?.status === "Memenuhi Target" ||
                     data.absen?.total_hours >= 8;
 
+                  // Penanda khusus untuk yang berstatus Izin/Sakit/Cuti
+                  const isLeave = data.absen?.is_leave;
+
                   return (
                     <tr
                       key={data.id}
@@ -195,14 +214,25 @@ export default function AdminMonitoring() {
                           {data.role === "kepsek"
                             ? "Kepala Sekolah"
                             : data.role === "tendik"
-                              ? "Tenaga Kependidikan"
-                              : "Guru"}
+                            ? "Tenaga Kependidikan"
+                            : "Guru"}
                         </p>
                       </td>
+
+                      {/* ========================================== */}
+                      {/* PERBAIKAN: TAMPILAN JAM DATANG */}
+                      {/* ========================================== */}
                       <td className="p-5 text-center">
                         {isHadir ? (
-                          <span className="font-bold text-emerald-600">
-                            {format(data.absen.check_in.time.toDate(), "HH:mm")}
+                          <span
+                            className={`font-bold ${
+                              isLeave ? "text-orange-500" : "text-emerald-600"
+                            }`}
+                          >
+                            {format(
+                              getValidTime(data.absen.check_in.time),
+                              "HH:mm",
+                            )}
                           </span>
                         ) : (
                           <span className="text-gray-300 font-medium">
@@ -210,16 +240,23 @@ export default function AdminMonitoring() {
                           </span>
                         )}
                       </td>
+
+                      {/* ========================================== */}
+                      {/* PERBAIKAN: TAMPILAN JAM PULANG */}
+                      {/* ========================================== */}
                       <td className="p-5 text-center">
                         {isPulang ? (
                           <div className="flex flex-col items-center gap-1">
-                            <span className="font-bold text-indigo-600">
+                            <span
+                              className={`font-bold ${
+                                isLeave ? "text-orange-500" : "text-indigo-600"
+                              }`}
+                            >
                               {format(
-                                data.absen.check_out.time.toDate(),
+                                getValidTime(data.absen.check_out.time),
                                 "HH:mm",
                               )}
                             </span>
-                            {/* BADGE TARGET JAM KERJA */}
                             <span
                               className={`text-[9px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider border ${
                                 isTargetMet
@@ -236,8 +273,13 @@ export default function AdminMonitoring() {
                           </span>
                         )}
                       </td>
+
                       <td className="p-5 text-center">
-                        {isPulang ? (
+                        {isLeave ? (
+                          <span className="bg-orange-50 text-orange-600 px-3 py-1.5 rounded-full text-xs font-bold border border-orange-200">
+                            {data.absen.status.toUpperCase()}
+                          </span>
+                        ) : isPulang ? (
                           <span className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-full text-xs font-bold border border-indigo-200">
                             Selesai
                           </span>
