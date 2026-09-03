@@ -1,65 +1,90 @@
 let timeOffset = 0;
 let isSynced = false;
-let timeManipulated = localStorage.getItem("is_time_manipulated") === "true";
-
-const initDateNow = Date.now();
-const initPerfNow = performance.now();
-
-const lockApp = () => {
-  timeManipulated = true;
-  localStorage.setItem("is_time_manipulated", "true");
-};
+let serverValidated = false;
 
 // ==========================================
-// PERBAIKAN: Fungsi Membuka Kunci
+// FUNGSI PENCARI WAKTU DUAL-SERVER
+// Jika Server 1 diblokir (Rate Limit), otomatis pindah ke Server 2
 // ==========================================
-const unlockApp = () => {
-  timeManipulated = false;
-  localStorage.removeItem("is_time_manipulated");
-
-  // HAPUS PARADOKS MASA DEPAN:
-  // Paksa reset rekam jejak waktu ke masa sekarang agar Detektor Lapis 2
-  // tidak langsung mengunci ulang aplikasinya.
-  localStorage.setItem("last_valid_time", Date.now().toString());
+const fetchNetworkTime = async () => {
+  try {
+    // Coba Server 1 (WorldTimeAPI) - Tambah nocache agar tidak nyangkut
+    const res1 = await fetch(
+      `https://worldtimeapi.org/api/timezone/Etc/UTC?nocache=${Date.now()}`,
+    );
+    if (res1.ok) {
+      const data1 = await res1.json();
+      return new Date(data1.datetime).getTime();
+    }
+    throw new Error("Server 1 gagal");
+  } catch (error) {
+    // Coba Server 2 (TimeAPI.io) jika Server 1 error
+    const res2 = await fetch(
+      "https://timeapi.io/api/Time/current/zone?timeZone=UTC",
+    );
+    if (res2.ok) {
+      const data2 = await res2.json();
+      // Tambahkan "Z" untuk memastikan format UTC
+      return new Date(data2.dateTime + "Z").getTime();
+    }
+    throw new Error("Semua server waktu gagal");
+  }
 };
 
-// Tambahkan parameter `force` agar bisa dipanggil paksa meski sudah sync
-export const syncServerTime = async (force = false) => {
-  if ((isSynced && !force) || !navigator.onLine) return;
+export const syncServerTime = async () => {
+  if (!navigator.onLine) return; // Jika offline, abaikan
 
   try {
-    const response = await fetch(
-      "https://worldtimeapi.org/api/timezone/Etc/UTC",
-    );
-    if (!response.ok) throw new Error("API gagal");
-
-    const data = await response.json();
-    const serverTime = new Date(data.datetime).getTime();
+    const serverTime = await fetchNetworkTime();
     const localTime = Date.now();
 
     timeOffset = serverTime - localTime;
     isSynced = true;
 
-    if (Math.abs(timeOffset) > 180000) {
-      lockApp();
+    // ==========================================
+    // LAPIS 1: HAKIM ONLINE (Toleransi dinaikkan menjadi 5 Menit)
+    // 5 Menit = 300.000 milidetik
+    // ==========================================
+    if (Math.abs(timeOffset) > 300000) {
+      // Jika selisih > 5 menit, KUNCI.
+      localStorage.setItem("is_time_manipulated", "true");
+      serverValidated = false;
     } else {
-      unlockApp();
+      // JAM TERBUKTI BENAR! HAPUS KUNCI SECARA PAKSA!
+      localStorage.removeItem("is_time_manipulated");
+      serverValidated = true;
+
+      // Hapus jebakan masa depan palsu
+      localStorage.setItem("last_valid_time", localTime.toString());
     }
   } catch (error) {
-    console.warn("Gagal menghubungi server waktu.");
-    isSynced = true;
+    console.warn("Gagal menyinkronkan waktu. Menunggu percobaan berikutnya.");
+    // Biarkan state apa adanya agar dia mencoba lagi nanti
   }
 };
 
 export const getSecureTime = () => {
   const currentLocalTime = Date.now();
-
   const lastSavedTime = localStorage.getItem("last_valid_time");
-  if (lastSavedTime && currentLocalTime < parseInt(lastSavedTime)) {
-    lockApp();
+
+  // ==========================================
+  // LAPIS 2: ANTI-REWIND (Mencegah mesin waktu ke masa lalu)
+  // Berlaku HANYA JIKA belum divalidasi oleh Server (Offline)
+  // ==========================================
+  if (
+    !serverValidated &&
+    lastSavedTime &&
+    currentLocalTime < parseInt(lastSavedTime)
+  ) {
+    localStorage.setItem("is_time_manipulated", "true");
   }
 
-  if (!lastSavedTime || currentLocalTime > parseInt(lastSavedTime)) {
+  // Rekam jejak waktu tertinggi (High Watermark)
+  if (
+    !lastSavedTime ||
+    currentLocalTime > parseInt(lastSavedTime) ||
+    serverValidated
+  ) {
     localStorage.setItem("last_valid_time", currentLocalTime.toString());
   }
 
@@ -67,14 +92,7 @@ export const getSecureTime = () => {
 };
 
 export const checkTimeTampering = () => {
-  if (timeManipulated) return true;
-
-  const elapsedHardware = performance.now() - initPerfNow;
-  const elapsedSystem = Date.now() - initDateNow;
-
-  if (Math.abs(elapsedSystem - elapsedHardware) > 10000) {
-    lockApp();
-  }
-
-  return timeManipulated;
+  // Hanya membaca status dari LocalStorage, tidak lagi menggunakan
+  // sensor CPU yang bermasalah saat HP sedang di "Sleep / Layar Mati"
+  return localStorage.getItem("is_time_manipulated") === "true";
 };
