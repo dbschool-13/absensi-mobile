@@ -94,6 +94,28 @@ export default function Dashboard() {
   const [isMapReady, setIsMapReady] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Fungsi untuk tombol Cek Ulang Waktu manual
+  const handleTimeSync = async () => {
+    if (!navigator.onLine) {
+      toast.error("Nyalakan koneksi internet terlebih dahulu!");
+      return;
+    }
+
+    setIsSyncingTime(true);
+    await syncServerTime(true); // Parameter 'true' memaksa Hakim mengecek ulang API Server
+
+    // Perbarui status manipulasi di layar saat ini juga
+    const stillManipulated = checkTimeTampering();
+    setIsTimeManipulated(stillManipulated);
+    setIsSyncingTime(false);
+
+    if (!stillManipulated) {
+      toast.success("Waktu telah sinkron. Silakan absen!");
+    } else {
+      toast.error("Jam masih tidak sinkron dengan server.");
+    }
+  };
+
   useEffect(() => {
     const fetchTodayAtt = async () => {
       // 1. Sinkronkan waktu global dulu saat aplikasi dibuka
@@ -711,12 +733,25 @@ export default function Dashboard() {
             <h3 className="font-black text-gray-800 text-lg mb-1">
               Manipulasi Jam Terdeteksi!
             </h3>
-            <p className="text-xs text-gray-500 font-medium">
+            <p className="text-xs text-gray-500 font-medium mb-4">
               Waktu pada perangkat Anda tidak sinkron dengan server. Harap
               aktifkan{" "}
               <strong className="text-red-500">"Waktu Otomatis"</strong> di
               Pengaturan HP Anda.
             </p>
+
+            {/* TAMBAHAN EKSTRA: Tombol untuk membuka segel kunci */}
+            <button
+              onClick={handleTimeSync}
+              disabled={isSyncingTime}
+              className="bg-red-500 hover:bg-red-600 text-white text-sm font-bold py-2.5 px-6 rounded-xl transition-all disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-red-500/30"
+            >
+              <RefreshCw
+                size={16}
+                className={isSyncingTime ? "animate-spin" : ""}
+              />
+              {isSyncingTime ? "Memeriksa..." : "Cek Ulang Waktu"}
+            </button>
           </div>
         ) : (
           <div className="bg-white/70 backdrop-blur-2xl p-2.5 rounded-[2rem] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.1)] border border-white flex gap-3">
