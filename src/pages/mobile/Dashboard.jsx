@@ -1,4 +1,8 @@
-import { syncServerTime, getSecureTime } from "../../utils/secureTime";
+import {
+  getSecureTime,
+  syncServerTime,
+  checkTimeTampering,
+} from "../../utils/secureTime";
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useGeolocation } from "../../hooks/useGeolocation";
@@ -19,13 +23,14 @@ import {
   CalendarCheck,
   MapPin,
   RefreshCw,
+  Clock, // Ikon peringatan waktu
 } from "lucide-react";
-import { format, differenceInMinutes, startOfWeek, endOfWeek } from "date-fns";
+import { format, startOfWeek, endOfWeek } from "date-fns";
 import { id } from "date-fns/locale";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../services/firebase";
 
-/// Helper Anti-Error untuk semua jenis HP (iOS/Android)
+// Helper Anti-Error untuk semua jenis HP (iOS/Android)
 const getValidTime = (timeData) => {
   if (!timeData) return new Date();
 
@@ -48,9 +53,9 @@ const getValidTime = (timeData) => {
 
 // Komponen Jam Mandiri
 const LiveClock = () => {
-  const [time, setTime] = useState(getSecureTime()); // Gunakan getSecureTime
+  const [time, setTime] = useState(getSecureTime());
   useEffect(() => {
-    const timer = setInterval(() => setTime(getSecureTime()), 1000); // Gunakan getSecureTime
+    const timer = setInterval(() => setTime(getSecureTime()), 1000);
     return () => clearInterval(timer);
   }, []);
   return (
@@ -87,7 +92,7 @@ export default function Dashboard() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState(null);
   const [isMapReady, setIsMapReady] = useState(false);
-  const [isSaving, setIsSaving] = useState(false); // Mengganti isCapturing
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     const fetchTodayAtt = async () => {
@@ -110,12 +115,10 @@ export default function Dashboard() {
     const fetchWeeklyData = async () => {
       if (!user || isOffline) return;
       try {
-        // 1. Tentukan awal dan akhir minggu berjalan
         const startOfWk = startOfWeek(currentTime, { weekStartsOn: 1 });
         const endOfWk = endOfWeek(currentTime, { weekStartsOn: 1 });
         const todayStr = format(currentTime, "yyyy-MM-dd");
 
-        // 2. Tarik SEMUA absen milik pegawai ini (lebih aman dari error index)
         const q = query(
           collection(db, "attendances"),
           where("user_id", "==", user.nip),
@@ -127,36 +130,30 @@ export default function Dashboard() {
         snap.forEach((doc) => {
           const data = doc.data();
 
-          if (!data.date) return; // Abaikan jika tidak ada tanggal
+          if (!data.date) return;
 
-          // Konversi tanggal Firestore ("YYYY-MM-DD") menjadi Date object
           const docDateParts = data.date.split("-");
-          // Catatan: Bulan di Javascript dimulai dari 0 (Jan = 0)
           const docDate = new Date(
             docDateParts[0],
             docDateParts[1] - 1,
             docDateParts[2],
           );
 
-          // 3. Filter Manual: Cek apakah absen ini ada di dalam minggu berjalan
           const isThisWeek = docDate >= startOfWk && docDate <= endOfWk;
 
-          // 4. Pastikan kita TIDAK MENGHITUNG absen hari ini (karena hari ini dihitung Live)
-          // dan pastikan total_hours valid berupa angka
           if (isThisWeek && data.date !== todayStr) {
             const hours = parseFloat(data.total_hours) || 0;
             pastTotal += hours;
           }
         });
 
-        // 5. Simpan total jam historis
         setWeeklyTotalPastDays(pastTotal);
       } catch (error) {
         console.error("Gagal menarik data mingguan:", error);
       }
     };
     fetchWeeklyData();
-  }, [user, isOffline]); // Akan dijalankan ulang jika user online kembali
+  }, [user, isOffline]);
 
   useEffect(() => {
     if (latitude && longitude && schoolData) {
@@ -222,7 +219,7 @@ export default function Dashboard() {
             data.lat,
             data.lng,
             data.distance,
-            null, // Parameter foto dikosongkan
+            null,
             data.timestamp,
           );
         } else {
@@ -232,7 +229,7 @@ export default function Dashboard() {
             data.lng,
             data.distance,
             data.checkInTime,
-            null, // Parameter foto dikosongkan
+            null,
             data.timestamp,
           );
         }
@@ -256,7 +253,6 @@ export default function Dashboard() {
     }
   };
 
-  // 1. Fungsi Buka Modal
   const openModal = (type) => {
     setModalType(type);
     setIsModalOpen(true);
@@ -266,14 +262,12 @@ export default function Dashboard() {
     }, 400);
   };
 
-  // 2. Fungsi Tutup Modal
   const closeModal = () => {
     setIsModalOpen(false);
     setModalType(null);
     setIsMapReady(false);
   };
 
-  // 3. Fungsi Simpan Absensi (Tanpa Kamera/Selfie)
   const handleSaveAttendance = async () => {
     setIsSaving(true);
     try {
@@ -312,7 +306,7 @@ export default function Dashboard() {
             latitude,
             longitude,
             distance,
-            null, // Kirim null untuk foto
+            null,
             timestampAsli,
           );
           if (result) setTodayAtt({ ...todayAtt, ...result });
@@ -323,12 +317,11 @@ export default function Dashboard() {
             longitude,
             distance,
             todayAtt.check_in.time,
-            null, // Kirim null untuk foto
+            null,
             timestampAsli,
           );
           if (result) setTodayAtt((prev) => ({ ...prev, ...result }));
         }
-        // toast.success("Absen berhasil disimpan!");
       }
 
       closeModal();
@@ -341,12 +334,15 @@ export default function Dashboard() {
   };
 
   // STATE BARU: Sinkronisasi waktu menggunakan standar server
+  const [isTimeManipulated, setIsTimeManipulated] = useState(false);
   const [calcTime, setCalcTime] = useState(getSecureTime());
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setCalcTime(getSecureTime()); // Gunakan secure time, jangan new Date()
-    }, 60000);
+      setCalcTime(getSecureTime());
+      // Terus pantau apakah ada indikasi manipulasi waktu
+      setIsTimeManipulated(checkTimeTampering());
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -410,17 +406,12 @@ export default function Dashboard() {
   if (shortHours > 0) shortText += `${shortHours}j `;
   shortText += `${shortMins}m`;
 
-  // ==========================================
-  // KALKULATOR MINGGUAN (LIVE)
-  // ==========================================
-  const targetWeeklyHours = workingDaysDef.length * 8; // Contoh: 5 x 8 = 40
+  const targetWeeklyHours = workingDaysDef.length * 8;
   const targetWeeklyMinutes = targetWeeklyHours * 60;
 
-  // Total Menit (Data hari lalu + Live hari ini)
   const totalWeeklyMinutesSoFar =
     weeklyTotalPastDays * 60 + Math.max(workedMinutes, 0);
 
-  // Selisih Kekurangan
   const weeklyDeficitMinutes = Math.max(
     targetWeeklyMinutes - totalWeeklyMinutesSoFar,
     0,
@@ -709,84 +700,104 @@ export default function Dashboard() {
         className="fixed bottom-24 left-0 w-full px-5 z-40 animate-fade-in-up"
         style={{ animationDelay: "0.4s" }}
       >
-        <div className="bg-white/70 backdrop-blur-2xl p-2.5 rounded-[2rem] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.1)] border border-white flex gap-3">
-          <button
-            onClick={() => openModal("datang")}
-            disabled={
-              !isInRadius ||
-              gpsLoading ||
-              hasCheckedIn ||
-              !isCheckInTimeValid ||
-              !isWorkingDay
-            }
-            className={`flex-1 py-4 rounded-[1.5rem] transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden ${
-              hasCheckedIn ||
-              (!isCheckInTimeValid && !hasCheckedIn) ||
-              !isInRadius ||
-              !isWorkingDay
-                ? "bg-gray-100 text-gray-400 opacity-90"
-                : "bg-emerald-500 text-white shadow-lg shadow-emerald-500/40 btn-active-pulse"
-            }`}
-          >
-            <span className="font-bold text-sm tracking-wide">
-              {!isWorkingDay
-                ? "Libur"
-                : hasCheckedIn
-                ? "Sudah Absen"
-                : "Absen Datang"}
-            </span>
-            {!hasCheckedIn && isWorkingDay && (
-              <span
-                className={`text-[9px] uppercase font-bold tracking-widest ${
-                  isCheckInTimeValid ? "text-emerald-100" : "text-red-400"
-                }`}
-              >
-                {isCheckInTimeValid
-                  ? `${timeRules.check_in_start} - ${timeRules.check_in_end}`
-                  : "Luar Jam"}
+        {/* ========================================== */}
+        {/* LOGIKA KEAMANAN: SEMBUNYIKAN TOMBOL JIKA DIMANIPULASI */}
+        {/* ========================================== */}
+        {isTimeManipulated ? (
+          <div className="bg-white/95 backdrop-blur-xl p-6 rounded-[2rem] shadow-[0_20px_40px_-15px_rgba(220,38,38,0.3)] border-2 border-red-100 flex flex-col items-center text-center animate-pulse">
+            <div className="w-14 h-14 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-3">
+              <Clock size={28} />
+            </div>
+            <h3 className="font-black text-gray-800 text-lg mb-1">
+              Manipulasi Jam Terdeteksi!
+            </h3>
+            <p className="text-xs text-gray-500 font-medium">
+              Waktu pada perangkat Anda tidak sinkron dengan server. Harap
+              aktifkan{" "}
+              <strong className="text-red-500">"Waktu Otomatis"</strong> di
+              Pengaturan HP Anda.
+            </p>
+          </div>
+        ) : (
+          <div className="bg-white/70 backdrop-blur-2xl p-2.5 rounded-[2rem] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.1)] border border-white flex gap-3">
+            <button
+              onClick={() => openModal("datang")}
+              disabled={
+                !isInRadius ||
+                gpsLoading ||
+                hasCheckedIn ||
+                !isCheckInTimeValid ||
+                !isWorkingDay
+              }
+              className={`flex-1 py-4 rounded-[1.5rem] transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden ${
+                hasCheckedIn ||
+                (!isCheckInTimeValid && !hasCheckedIn) ||
+                !isInRadius ||
+                !isWorkingDay
+                  ? "bg-gray-100 text-gray-400 opacity-90"
+                  : "bg-emerald-500 text-white shadow-lg shadow-emerald-500/40 btn-active-pulse"
+              }`}
+            >
+              <span className="font-bold text-sm tracking-wide">
+                {!isWorkingDay
+                  ? "Libur"
+                  : hasCheckedIn
+                  ? "Sudah Absen"
+                  : "Absen Datang"}
               </span>
-            )}
-          </button>
+              {!hasCheckedIn && isWorkingDay && (
+                <span
+                  className={`text-[9px] uppercase font-bold tracking-widest ${
+                    isCheckInTimeValid ? "text-emerald-100" : "text-red-400"
+                  }`}
+                >
+                  {isCheckInTimeValid
+                    ? `${timeRules.check_in_start} - ${timeRules.check_in_end}`
+                    : "Luar Jam"}
+                </span>
+              )}
+            </button>
 
-          <button
-            onClick={() => openModal("pulang")}
-            disabled={
-              !isInRadius ||
-              !hasCheckedIn ||
-              hasCheckedOut ||
-              !isCheckOutTimeValid ||
-              !isWorkingDay
-            }
-            className={`flex-1 py-4 rounded-[1.5rem] transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden ${
-              !hasCheckedIn ||
-              hasCheckedOut ||
-              (!isCheckOutTimeValid && hasCheckedIn && !hasCheckedOut) ||
-              !isInRadius ||
-              !isWorkingDay
-                ? "bg-gray-100 text-gray-400 opacity-90"
-                : "bg-red-500 text-white shadow-lg shadow-red-500/40 btn-active-pulse"
-            }`}
-          >
-            <span className="font-bold text-sm tracking-wide">
-              {!isWorkingDay
-                ? "Libur"
-                : hasCheckedOut
-                ? "Sudah Absen"
-                : "Absen Pulang"}
-            </span>
-            {hasCheckedIn && !hasCheckedOut && isWorkingDay && (
-              <span
-                className={`text-[9px] uppercase font-bold tracking-widest ${
-                  isCheckOutTimeValid ? "text-red-100" : "text-red-400"
-                }`}
-              >
-                {isCheckOutTimeValid
-                  ? `${timeRules.check_out_start} - ${timeRules.check_out_end}`
-                  : "Luar Jam"}
+            <button
+              onClick={() => openModal("pulang")}
+              disabled={
+                !isInRadius ||
+                !hasCheckedIn ||
+                hasCheckedOut ||
+                !isCheckOutTimeValid ||
+                !isWorkingDay
+              }
+              className={`flex-1 py-4 rounded-[1.5rem] transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden ${
+                !hasCheckedIn ||
+                hasCheckedOut ||
+                (!isCheckOutTimeValid && hasCheckedIn && !hasCheckedOut) ||
+                !isInRadius ||
+                !isWorkingDay
+                  ? "bg-gray-100 text-gray-400 opacity-90"
+                  : "bg-red-500 text-white shadow-lg shadow-red-500/40 btn-active-pulse"
+              }`}
+            >
+              <span className="font-bold text-sm tracking-wide">
+                {!isWorkingDay
+                  ? "Libur"
+                  : hasCheckedOut
+                  ? "Sudah Absen"
+                  : "Absen Pulang"}
               </span>
-            )}
-          </button>
-        </div>
+              {hasCheckedIn && !hasCheckedOut && isWorkingDay && (
+                <span
+                  className={`text-[9px] uppercase font-bold tracking-widest ${
+                    isCheckOutTimeValid ? "text-red-100" : "text-red-400"
+                  }`}
+                >
+                  {isCheckOutTimeValid
+                    ? `${timeRules.check_out_start} - ${timeRules.check_out_end}`
+                    : "Luar Jam"}
+                </span>
+              )}
+            </button>
+          </div>
+        )}
       </div>
 
       {isModalOpen && (
