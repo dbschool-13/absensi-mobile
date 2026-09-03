@@ -2,92 +2,67 @@ let timeOffset = 0;
 let isSynced = false;
 let timeManipulated = false;
 
-// Variabel Sensor Detak CPU (Runtime Tampering)
-let lastRealTime = Date.now();
-let lastPerfTime = performance.now();
+// ==========================================
+// INISIALISASI SENSOR HARDWARE
+// Mencatat waktu saat aplikasi pertama kali dibuka (Boot Time)
+// ==========================================
+const initDateNow = Date.now(); // Waktu sistem OS (bisa dimanipulasi)
+const initPerfNow = performance.now(); // Detak murni CPU (TIDAK BISA dimanipulasi)
 
 export const syncServerTime = async () => {
   if (isSynced || !navigator.onLine) return;
 
   try {
-    let serverTimeMs = 0;
+    // Meminta waktu UTC agar tidak ada bentrok zona waktu lokal HP
+    const response = await fetch(
+      "https://worldtimeapi.org/api/timezone/Etc/UTC",
+    );
+    if (!response.ok) throw new Error("API gagal");
 
-    // API UTAMA: WorldTimeAPI
-    try {
-      const res1 = await fetch("https://worldtimeapi.org/api/ip", {
-        cache: "no-store",
-      });
-      if (res1.ok) {
-        const data = await res1.json();
-        serverTimeMs = new Date(data.datetime).getTime();
-      } else throw new Error();
-    } catch (e1) {
-      // API CADANGAN: TimeAPI (Aktif jika API utama diblokir/down)
-      const res2 = await fetch(
-        "https://timeapi.io/api/Time/current/zone?timeZone=UTC",
-        { cache: "no-store" },
-      );
-      if (res2.ok) {
-        const data2 = await res2.json();
-        serverTimeMs = new Date(data2.dateTime).getTime();
-      } else throw new Error();
-    }
-
+    const data = await response.json();
+    const serverTime = new Date(data.datetime).getTime();
     const localTime = Date.now();
-    timeOffset = serverTimeMs - localTime;
+
+    timeOffset = serverTime - localTime;
     isSynced = true;
 
-    // LAPIS 1: Toleransi diperketat menjadi 1 Menit (60.000 ms)
-    if (Math.abs(timeOffset) > 60000) {
+    // LAPIS 1: DETEKSI SELISIH JAM ONLINE
+    // Jika jam HP selisih lebih dari 3 Menit (180.000 ms) dengan Server Global
+    if (Math.abs(timeOffset) > 180000) {
       timeManipulated = true;
     }
-
-    // Simpan sertifikat kalibrasi ke memori HP
-    localStorage.setItem("time_calibrated", "true");
-    localStorage.setItem("last_valid_time", localTime.toString());
   } catch (error) {
-    console.warn("Semua TimeServer gagal dihubungi.");
-    // LAPIS 2: ANTI HAPUS CACHE (Clear Data Exploit)
-    // Jika belum pernah dikalibrasi (habis hapus data) DAN tidak ada internet, langsung KUNCI!
-    if (!localStorage.getItem("time_calibrated")) {
-      timeManipulated = true;
-    }
+    console.warn("Gagal menghubungi server waktu. Mengandalkan deteksi lokal.");
+    isSynced = true;
   }
 };
 
 export const getSecureTime = () => {
   const currentLocalTime = Date.now();
-  const currentPerfTime = performance.now();
 
-  // LAPIS 3: DETEKSI MANIPULASI SAAT APLIKASI BERJALAN (Runtime Time-Jump)
-  // Membandingkan durasi nyala CPU vs durasi jam kalender
-  const perfDiff = currentPerfTime - lastPerfTime;
-  const realDiff = currentLocalTime - lastRealTime;
-
-  // Jika jam HP diloncatkan > 5 detik saat aplikasi sedang terbuka di background
-  if (Math.abs(realDiff - perfDiff) > 5000) {
+  // LAPIS 2: ANTI-REWIND (Mencegah mesin waktu ke masa lalu)
+  const lastSavedTime = localStorage.getItem("last_valid_time");
+  if (lastSavedTime && currentLocalTime < parseInt(lastSavedTime)) {
     timeManipulated = true;
   }
-
-  lastRealTime = currentLocalTime;
-  lastPerfTime = currentPerfTime;
-
-  // LAPIS 4: ANTI "TIME TRAVEL" (Offline Rewind)
-  const lastSavedTime = localStorage.getItem("last_valid_time");
-  if (lastSavedTime) {
-    if (currentLocalTime < parseInt(lastSavedTime)) {
-      timeManipulated = true;
-    }
-  }
-
-  // Update rekam jejak waktu hanya jika sistem masih aman
-  if (!timeManipulated && isSynced) {
-    localStorage.setItem("last_valid_time", currentLocalTime.toString());
-  }
+  localStorage.setItem("last_valid_time", currentLocalTime.toString());
 
   return new Date(currentLocalTime + timeOffset);
 };
 
 export const checkTimeTampering = () => {
+  // LAPIS 3: DETEKTOR MANIPULASI REAL-TIME (MONOTONIC CLOCK)
+  // Membandingkan perjalanan waktu sistem vs perjalanan waktu detak hardware
+  const elapsedHardware = performance.now() - initPerfNow;
+  const elapsedSystem = Date.now() - initDateNow;
+
+  // Jika guru mengubah jam di pengaturan HP saat aplikasi berjalan/di background,
+  // maka elapsedSystem akan melompat (misal mundur/maju 1 jam),
+  // sedangkan elapsedHardware HANYA bertambah beberapa detik.
+  // Batas toleransi (lag HP) adalah 10 detik (10.000 ms).
+  if (Math.abs(elapsedSystem - elapsedHardware) > 10000) {
+    timeManipulated = true;
+  }
+
   return timeManipulated;
 };
