@@ -7,7 +7,7 @@ import {
   Target,
   ChevronDown,
   AlertCircle,
-} from "lucide-react"; // <-- Tambah AlertCircle
+} from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { id } from "date-fns/locale";
 
@@ -148,11 +148,53 @@ export default function Riwayat() {
           // List Item
           history.map((item) => {
             const dateObj = parseISO(item.date);
-            const isCompleted = item.status === "Memenuhi Target";
 
-            // Logika Menghitung Kekurangan Jam (jika sudah pulang dan kurang dari 8 jam)
+            // ==========================================
+            // LOGIKA BARU: MEMBACA STATUS IZIN & BADGES
+            // ==========================================
+            const note = (item.notes || "").toUpperCase();
+            const isAutoInject = note.includes("[AUTO-INJECT");
+
+            let badgeLabel =
+              item.status === "Memenuhi Target" ? "Hadir" : item.status;
+            let badgeClass =
+              "bg-emerald-50 text-emerald-600 border-emerald-200";
+
+            if (isAutoInject) {
+              if (note.includes("CUTI")) {
+                badgeLabel = "Cuti";
+                badgeClass = "bg-purple-50 text-purple-600 border-purple-200";
+              } else if (note.includes("SAKIT")) {
+                badgeLabel = "Sakit";
+                badgeClass = "bg-orange-50 text-orange-600 border-orange-200";
+              } else if (note.includes("IZIN KEDINASAN")) {
+                badgeLabel = "Izin Kedinasan";
+                badgeClass = "bg-blue-50 text-blue-600 border-blue-200";
+              } else if (
+                note.includes("IZIN PRIBADI") ||
+                note.includes("IZIN")
+              ) {
+                badgeLabel = "Izin Pribadi";
+                badgeClass = "bg-blue-50 text-blue-600 border-blue-200";
+              }
+            } else if (item.status === "Belum Pulang") {
+              badgeClass = "bg-blue-50 text-blue-600 border-blue-200";
+            } else if (item.status === "Kurang Jam" || item.status === "late") {
+              badgeClass = "bg-red-50 text-red-600 border-red-200";
+              if (item.status === "late") badgeLabel = "Terlambat";
+            }
+
+            const isCompleted =
+              item.status === "Memenuhi Target" || item.total_hours >= 8;
+
+            // Logika Menghitung Kekurangan Jam (Hanya berlaku untuk absen normal, bukan auto-inject 0 jam)
             let shortText = null;
-            if (item.check_out && !isCompleted && item.total_hours < 8) {
+            if (
+              item.check_out &&
+              !isCompleted &&
+              item.total_hours < 8 &&
+              !isAutoInject
+            ) {
               const targetMinutes = 8 * 60; // 480 menit
               const workedMinutes = Math.round(item.total_hours * 60);
               const shortfall = targetMinutes - workedMinutes;
@@ -183,22 +225,16 @@ export default function Riwayat() {
                   </div>
 
                   <div
-                    className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                      isCompleted
-                        ? "bg-emerald-50 text-emerald-600"
-                        : item.status === "Belum Pulang"
-                        ? "bg-blue-50 text-blue-600"
-                        : "bg-red-50 text-red-600"
-                    }`}
+                    className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${badgeClass}`}
                   >
-                    {item.status}
+                    {badgeLabel}
                   </div>
                 </div>
 
                 {/* Info Jam */}
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center border border-emerald-100">
                       <Clock size={16} className="text-emerald-500" />
                     </div>
                     <div>
@@ -219,7 +255,7 @@ export default function Riwayat() {
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center border border-red-100">
                       <Clock size={16} className="text-red-500" />
                     </div>
                     <div>
@@ -240,9 +276,9 @@ export default function Riwayat() {
                   </div>
                 </div>
 
-                {/* Total Jam Kerja & Kekurangan */}
+                {/* Total Jam Kerja & Kekurangan (Hanya muncul jika check_out ada) */}
                 {item.check_out && (
-                  <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1 mt-1">
+                  <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1 mt-1 border border-gray-100">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-2 text-gray-600">
                         <Target size={14} />
@@ -256,7 +292,7 @@ export default function Riwayat() {
                       </span>
                     </div>
 
-                    {/* BAGIAN TAMBAHAN: Muncul hanya jika kurang dari target */}
+                    {/* Muncul hanya jika ada teks kurang jam */}
                     {shortText && (
                       <div className="flex justify-end items-center gap-1.5 mt-0.5">
                         <AlertCircle size={12} className="text-orange-500" />

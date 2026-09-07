@@ -23,7 +23,7 @@ import {
   CalendarCheck,
   MapPin,
   RefreshCw,
-  Clock, // Ikon peringatan waktu
+  Clock,
 } from "lucide-react";
 import { format, startOfWeek, endOfWeek } from "date-fns";
 import { id } from "date-fns/locale";
@@ -33,21 +33,11 @@ import { db } from "../../services/firebase";
 // Helper Anti-Error untuk semua jenis HP (iOS/Android)
 const getValidTime = (timeData) => {
   if (!timeData) return new Date();
-
-  if (typeof timeData.toDate === "function") {
-    return timeData.toDate();
-  }
-
-  // Perbaikan bug spasi di HP Apple/Safari
+  if (typeof timeData.toDate === "function") return timeData.toDate();
   let parsedStr = timeData;
-  if (typeof timeData === "string") {
-    parsedStr = timeData.replace(" ", "T");
-  }
-
+  if (typeof timeData === "string") parsedStr = timeData.replace(" ", "T");
   const d = new Date(parsedStr);
-  // Jika browser HP gagal membaca (Invalid Date), kembalikan waktu sekarang
   if (isNaN(d.getTime())) return new Date();
-
   return d;
 };
 
@@ -96,12 +86,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const fetchTodayAtt = async () => {
-      // 1. Sinkronkan waktu global dulu saat aplikasi dibuka
-      if (navigator.onLine) {
-        await syncServerTime();
-      }
-
-      // 2. Lanjut ambil data absen (Sisa kode Anda)
+      if (navigator.onLine) await syncServerTime();
       if (user) {
         const attData = await attendanceService.getTodayAttendance(user.nip);
         setTodayAtt(attData);
@@ -110,7 +95,6 @@ export default function Dashboard() {
     fetchTodayAtt();
   }, [user]);
 
-  // Mengambil dan menghitung total jam mingguan (Senin - Minggu)
   useEffect(() => {
     const fetchWeeklyData = async () => {
       if (!user || isOffline) return;
@@ -123,22 +107,18 @@ export default function Dashboard() {
           collection(db, "attendances"),
           where("user_id", "==", user.nip),
         );
-
         const snap = await getDocs(q);
         let pastTotal = 0;
 
         snap.forEach((doc) => {
           const data = doc.data();
-
           if (!data.date) return;
-
           const docDateParts = data.date.split("-");
           const docDate = new Date(
             docDateParts[0],
             docDateParts[1] - 1,
             docDateParts[2],
           );
-
           const isThisWeek = docDate >= startOfWk && docDate <= endOfWk;
 
           if (isThisWeek && data.date !== todayStr) {
@@ -146,7 +126,6 @@ export default function Dashboard() {
             pastTotal += hours;
           }
         });
-
         setWeeklyTotalPastDays(pastTotal);
       } catch (error) {
         console.error("Gagal menarik data mingguan:", error);
@@ -168,7 +147,6 @@ export default function Dashboard() {
     }
   }, [latitude, longitude, schoolData]);
 
-  // Sensor Internet & Auto-Sync
   useEffect(() => {
     const checkQueue = () => {
       const queue = JSON.parse(
@@ -183,7 +161,6 @@ export default function Dashboard() {
       toast.success("Koneksi pulih! Menyinkronkan data...");
       syncOfflineData();
     };
-
     const handleOffline = () => {
       setIsOffline(true);
       toast.error("Koneksi terputus! Beralih ke Mode Offline.", { icon: "📡" });
@@ -191,14 +168,12 @@ export default function Dashboard() {
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
-
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
   }, []);
 
-  // Fungsi Eksekutor Antrean Offline (Tanpa Foto)
   const syncOfflineData = async () => {
     const queue = JSON.parse(
       localStorage.getItem("offline_attendance") || "[]",
@@ -235,9 +210,7 @@ export default function Dashboard() {
         }
         newQueue = newQueue.filter((item) => item.id !== data.id);
         successCount++;
-      } catch (error) {
-        console.error("Gagal sinkron data ID:", data.id);
-      }
+      } catch (error) {}
     }
 
     localStorage.setItem("offline_attendance", JSON.stringify(newQueue));
@@ -245,9 +218,7 @@ export default function Dashboard() {
     setGlobalLoading(false);
 
     if (successCount > 0) {
-      toast.success(
-        `${successCount} data absen offline berhasil dikirim ke server!`,
-      );
+      toast.success(`${successCount} data absen offline terkirim!`);
       const attData = await attendanceService.getTodayAttendance(user.nip);
       setTodayAtt(attData);
     }
@@ -257,9 +228,7 @@ export default function Dashboard() {
     setModalType(type);
     setIsModalOpen(true);
     setIsMapReady(false);
-    setTimeout(() => {
-      setIsMapReady(true);
-    }, 400);
+    setTimeout(() => setIsMapReady(true), 400);
   };
 
   const closeModal = () => {
@@ -272,9 +241,7 @@ export default function Dashboard() {
     setIsSaving(true);
     try {
       const timestampAsli = getSecureTime().toISOString();
-
       if (isOffline) {
-        // --- MODE OFFLINE ---
         const attendancePayload = {
           id: Date.now().toString(),
           type: modalType,
@@ -286,19 +253,14 @@ export default function Dashboard() {
           timestamp: timestampAsli,
           checkInTime: todayAtt?.check_in?.time || null,
         };
-
         const queue = JSON.parse(
           localStorage.getItem("offline_attendance") || "[]",
         );
         queue.push(attendancePayload);
         localStorage.setItem("offline_attendance", JSON.stringify(queue));
-
         setPendingSync(queue.length);
-        toast.success(
-          "📶 Koneksi kurang stabil/offline. Absen akan dikirim otomatis saat koneksi stabil.",
-        );
+        toast.success("📶 Disimpan offline. Dikirim otomatis saat online.");
       } else {
-        // --- MODE ONLINE ---
         if (modalType === "datang") {
           const result = await attendanceService.checkIn(
             user.nip,
@@ -323,28 +285,39 @@ export default function Dashboard() {
           if (result) setTodayAtt((prev) => ({ ...prev, ...result }));
         }
       }
-
       closeModal();
     } catch (error) {
-      console.error("Error saving attendance:", error);
-      toast.error("Terjadi kesalahan saat menyimpan absen.");
+      toast.error("Terjadi kesalahan.");
     } finally {
       setIsSaving(false);
     }
   };
 
-  // STATE BARU: Sinkronisasi waktu menggunakan standar server
   const [isTimeManipulated, setIsTimeManipulated] = useState(false);
   const [calcTime, setCalcTime] = useState(getSecureTime());
 
   useEffect(() => {
     const timer = setInterval(() => {
       setCalcTime(getSecureTime());
-      // Terus pantau apakah ada indikasi manipulasi waktu
       setIsTimeManipulated(checkTimeTampering());
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // ==========================================
+  // LOGIKA OVERRIDE DETEKSI IZIN/CUTI
+  // ==========================================
+  const isAutoInject = todayAtt?.notes?.includes("[AUTO-INJECT");
+  const isLeaveZero = todayAtt?.total_hours === 0 && isAutoInject;
+  const isLeaveFull = todayAtt?.total_hours === 8 && isAutoInject;
+
+  // Ambil label asli jika ada, namun hindari teks "completed"
+  let leaveLabel = todayAtt?.status || "IZIN";
+  if (isLeaveFull && isAutoInject) {
+    // Tarik tulisan CUTI / IZIN KEDINASAN dari catatan (notes)
+    const match = todayAtt.notes.match(/\[AUTO-INJECT:\s(.*?)\]/);
+    if (match) leaveLabel = match[1];
+  }
 
   const hasCheckedIn = !!todayAtt?.check_in;
   const hasCheckedOut = !!todayAtt?.check_out;
@@ -364,6 +337,7 @@ export default function Dashboard() {
     check_out_start: "15:00",
     check_out_end: "18:00",
   };
+
   const isCheckInTimeValid =
     currentHM >= timeRules.check_in_start &&
     currentHM <= timeRules.check_in_end;
@@ -374,21 +348,18 @@ export default function Dashboard() {
   const targetMinutes = 8 * 60;
   let workedMinutes = 0;
 
-  if (hasCheckedIn) {
+  // OVERRIDE KALKULASI JAM UNTUK HARI IZIN/CUTI/SAKIT
+  if (isLeaveZero) {
+    workedMinutes = 0;
+  } else if (isLeaveFull) {
+    workedMinutes = targetMinutes; // Paksa 8 Jam
+  } else if (hasCheckedIn) {
     const checkInDate = getValidTime(todayAtt.check_in.time);
-    let endTime = calcTime; // Default: waktu berjalan
+    let endTime = calcTime;
+    if (hasCheckedOut) endTime = getValidTime(todayAtt.check_out.time);
 
-    if (hasCheckedOut) {
-      endTime = getValidTime(todayAtt.check_out.time);
-    }
-
-    // Selisih dalam satuan Milidetik murni (Anti-NaN di HP lama)
     let diffMs = endTime.getTime() - checkInDate.getTime();
-
-    // Mencegah angka minus jika terjadi desinkronisasi jam HP
     if (diffMs < 0) diffMs = 0;
-
-    // Konversi milidetik ke Menit
     workedMinutes = Math.floor(diffMs / (1000 * 60));
   }
 
@@ -408,10 +379,8 @@ export default function Dashboard() {
 
   const targetWeeklyHours = workingDaysDef.length * 8;
   const targetWeeklyMinutes = targetWeeklyHours * 60;
-
   const totalWeeklyMinutesSoFar =
     weeklyTotalPastDays * 60 + Math.max(workedMinutes, 0);
-
   const weeklyDeficitMinutes = Math.max(
     targetWeeklyMinutes - totalWeeklyMinutesSoFar,
     0,
@@ -457,7 +426,6 @@ export default function Dashboard() {
               </h2>
             </div>
           </div>
-
           <div className="w-14 h-14 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center p-1.5 shadow-lg border border-white/20">
             {schoolData?.logo_url ? (
               <img
@@ -478,7 +446,6 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {/* Indikator Offline Sync */}
         {pendingSync > 0 && (
           <div className="absolute top-6 right-6 bg-orange-500 text-white px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg flex items-center gap-1.5 animate-pulse z-20">
             <RefreshCw size={12} className={isOffline ? "" : "animate-spin"} />
@@ -525,7 +492,6 @@ export default function Dashboard() {
                 </h3>
               </div>
             </div>
-
             <div className="flex flex-col items-end gap-2">
               <div
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold ${
@@ -549,7 +515,6 @@ export default function Dashboard() {
               </button>
             </div>
           </div>
-
           <div className="px-5 py-3 border-t border-gray-100 flex justify-between items-center bg-gray-50/50 rounded-b-[1.3rem]">
             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
               Jadwal Hari Ini
@@ -595,7 +560,9 @@ export default function Dashboard() {
                 strokeDasharray={circleCircumference}
                 strokeDashoffset={strokeDashoffset}
                 strokeLinecap="round"
-                className="text-emerald-500 transition-all duration-1000 ease-out drop-shadow-md"
+                className={`${
+                  isLeaveZero ? "text-red-500" : "text-emerald-500"
+                } transition-all duration-1000 ease-out drop-shadow-md`}
               />
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
@@ -604,7 +571,6 @@ export default function Dashboard() {
               </span>
             </div>
           </div>
-
           <div className="flex-1">
             <p className="text-[10px] font-bold uppercase tracking-wider text-primary mb-1">
               Target 8 Jam
@@ -613,14 +579,23 @@ export default function Dashboard() {
               {hoursWorked} Jam{" "}
               <span className="text-sm text-gray-500">{minsWorked} menit</span>
             </h3>
+
             <p
               className={`text-xs font-medium ${
-                hasCheckedOut && progressPercent < 100
+                isLeaveZero
+                  ? "text-red-500 font-bold"
+                  : isLeaveFull
+                  ? "text-emerald-500 font-bold"
+                  : hasCheckedOut && progressPercent < 100
                   ? "text-orange-500 font-bold"
                   : "text-gray-400"
               }`}
             >
-              {hasCheckedOut
+              {isLeaveZero
+                ? "❌ Tidak Memenuhi (0 Jam)"
+                : isLeaveFull
+                ? "✅ Hadir Penuh (Izin Resmi)"
+                : hasCheckedOut
                 ? progressPercent >= 100
                   ? "✅ Target Terpenuhi"
                   : shortText
@@ -650,6 +625,9 @@ export default function Dashboard() {
           className="grid grid-cols-2 gap-4 animate-fade-in-up"
           style={{ animationDelay: "0.3s" }}
         >
+          {/* ==================================================== */}
+          {/* PERBAIKAN CARD ABSEN MASUK & PULANG */}
+          {/* ==================================================== */}
           <div className="bg-white rounded-3xl shadow-lg shadow-gray-200/50 p-5 border border-gray-100 relative overflow-hidden group">
             <div className="absolute -right-4 -bottom-4 bg-emerald-50 w-24 h-24 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
             <div className="flex items-center gap-2 text-gray-400 mb-2 relative z-10">
@@ -661,14 +639,19 @@ export default function Dashboard() {
               </span>
             </div>
             <p className="text-3xl font-black text-gray-800 relative z-10">
-              {hasCheckedIn
-                ? format(
-                    todayAtt.check_in.time?.toDate
-                      ? todayAtt.check_in.time.toDate()
-                      : new Date(todayAtt.check_in.time),
-                    "HH:mm",
-                  )
-                : "--:--"}
+              {/* Jika 0 jam, tampilkan status. Jika tidak, tetap tampilkan format waktu */}
+              {isLeaveZero ? (
+                <span className="text-xl text-orange-500">{leaveLabel}</span>
+              ) : hasCheckedIn ? (
+                format(
+                  todayAtt.check_in.time?.toDate
+                    ? todayAtt.check_in.time.toDate()
+                    : new Date(todayAtt.check_in.time),
+                  "HH:mm",
+                )
+              ) : (
+                "--:--"
+              )}
             </p>
           </div>
 
@@ -683,14 +666,19 @@ export default function Dashboard() {
               </span>
             </div>
             <p className="text-3xl font-black text-gray-800 relative z-10">
-              {hasCheckedOut
-                ? format(
-                    todayAtt.check_out.time?.toDate
-                      ? todayAtt.check_out.time.toDate()
-                      : new Date(todayAtt.check_out.time),
-                    "HH:mm",
-                  )
-                : "--:--"}
+              {/* Sama seperti di atas */}
+              {isLeaveZero ? (
+                <span className="text-xl text-orange-500">{leaveLabel}</span>
+              ) : hasCheckedOut ? (
+                format(
+                  todayAtt.check_out.time?.toDate
+                    ? todayAtt.check_out.time.toDate()
+                    : new Date(todayAtt.check_out.time),
+                  "HH:mm",
+                )
+              ) : (
+                "--:--"
+              )}
             </p>
           </div>
         </div>
@@ -700,9 +688,6 @@ export default function Dashboard() {
         className="fixed bottom-24 left-0 w-full px-5 z-40 animate-fade-in-up"
         style={{ animationDelay: "0.4s" }}
       >
-        {/* ========================================== */}
-        {/* LOGIKA KEAMANAN: SEMBUNYIKAN TOMBOL JIKA DIMANIPULASI */}
-        {/* ========================================== */}
         {isTimeManipulated ? (
           <div className="bg-white/95 backdrop-blur-xl p-6 rounded-[2rem] shadow-[0_20px_40px_-15px_rgba(220,38,38,0.3)] border-2 border-red-100 flex flex-col items-center text-center animate-pulse">
             <div className="w-14 h-14 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-3">
@@ -717,6 +702,24 @@ export default function Dashboard() {
               <strong className="text-red-500">"Waktu Otomatis"</strong> di
               Pengaturan HP Anda.
             </p>
+          </div>
+        ) : isLeaveZero || isLeaveFull ? (
+          <div className="bg-white/95 backdrop-blur-xl p-5 rounded-[2rem] shadow-xl border border-orange-100 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center shadow-inner">
+                <CalendarCheck size={24} />
+              </div>
+              <div>
+                <h3 className="font-black text-gray-800 text-base mb-0.5">
+                  Status: {leaveLabel}
+                </h3>
+                <p className="text-[10px] text-gray-500 font-medium tracking-wide">
+                  {isLeaveZero
+                    ? "Bebas tugas absensi hari ini."
+                    : "Dianggap hadir penuh hari ini."}
+                </p>
+              </div>
+            </div>
           </div>
         ) : (
           <div className="bg-white/70 backdrop-blur-2xl p-2.5 rounded-[2rem] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.1)] border border-white flex gap-3">
@@ -757,7 +760,6 @@ export default function Dashboard() {
                 </span>
               )}
             </button>
-
             <button
               onClick={() => openModal("pulang")}
               disabled={
@@ -800,12 +802,12 @@ export default function Dashboard() {
         )}
       </div>
 
+      {/* Modal JSX tetap sama... */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/40 backdrop-blur-sm transition-opacity">
           <div className="absolute inset-0" onClick={closeModal}></div>
           <div className="bg-white rounded-t-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden animate-[slideUp_0.3s_ease-out] relative z-10 pb-24 pt-3">
             <div className="w-16 h-1.5 bg-gray-200 rounded-full mx-auto my-2"></div>
-
             <div className="px-6 py-4 flex justify-between items-center mb-2 border-b border-gray-50">
               <div>
                 <h3 className="text-lg font-black text-gray-800 tracking-tight">
@@ -823,7 +825,6 @@ export default function Dashboard() {
                 <X size={20} />
               </button>
             </div>
-
             <div className="px-6 space-y-4 mt-4">
               <div className="h-[200px] w-full bg-slate-100 rounded-[2rem] overflow-hidden relative border-4 border-white mb-4 shadow-inner">
                 {latitude &&
@@ -858,7 +859,6 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
-
               <div
                 className={`p-4 rounded-[1.5rem] flex items-center justify-center gap-3 border ${
                   isInRadius
@@ -878,7 +878,6 @@ export default function Dashboard() {
                 </span>
               </div>
             </div>
-
             <div className="p-6 pt-2 flex gap-3">
               <button
                 onClick={closeModal}
@@ -887,7 +886,6 @@ export default function Dashboard() {
               >
                 Batal
               </button>
-
               <button
                 onClick={handleSaveAttendance}
                 disabled={!isInRadius || isSaving}

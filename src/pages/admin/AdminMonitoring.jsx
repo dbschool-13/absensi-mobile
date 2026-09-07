@@ -63,25 +63,44 @@ export default function AdminMonitoring() {
     }
   }, [user]);
 
+  // ==========================================================
+  // PERBAIKAN LOGIKA PEMBACAAN STATUS IZIN (AUTO-INJECT)
+  // ==========================================================
   const monitoringData = teachers
     .map((guru) => {
       const absenHariIni = realtimeAtt.find((att) => att.user_id === guru.nip);
+
+      // Definisikan status default
+      let isHadir = false;
+      let isAutoInject = false;
+
+      if (absenHariIni) {
+        const note = (absenHariIni.notes || "").toUpperCase();
+        isAutoInject = note.includes("[AUTO-INJECT");
+
+        // Dianggap "Ada Kejelasan Status" jika: punya check_in ATAU disuntik sistem (izin/cuti)
+        isHadir = !!absenHariIni.check_in || isAutoInject;
+      }
+
       return {
         ...guru,
         absen: absenHariIni || null,
+        isHadirRecord: isHadir,
+        isAutoInject: isAutoInject,
       };
     })
     .sort((a, b) => {
-      const aHadir = !!a.absen?.check_in;
-      const bHadir = !!b.absen?.check_in;
+      // Urutkan: Yang sudah hadir/izin di atas, yang belum datang di bawah
+      if (a.isHadirRecord && !b.isHadirRecord) return -1;
+      if (!a.isHadirRecord && b.isHadirRecord) return 1;
 
-      if (aHadir && !bHadir) return -1;
-      if (!aHadir && bHadir) return 1;
-
-      // ==========================================
-      // PERBAIKAN: GUNAKAN getValidTime DI SINI
-      // ==========================================
-      if (aHadir && bHadir) {
+      // Jika keduanya ada record, urutkan berdasarkan jam datang (jika ada)
+      if (
+        a.isHadirRecord &&
+        b.isHadirRecord &&
+        a.absen?.check_in &&
+        b.absen?.check_in
+      ) {
         const timeA = getValidTime(a.absen.check_in.time);
         const timeB = getValidTime(b.absen.check_in.time);
         return timeB - timeA;
@@ -90,7 +109,12 @@ export default function AdminMonitoring() {
     });
 
   const totalPegawai = teachers.length;
-  const totalHadir = realtimeAtt.length;
+  // Yang dihitung "Sudah Hadir" di kotak atas adalah mereka yang benar-benar absen (bukan yang 0 Jam)
+  const totalHadir = realtimeAtt.filter(
+    (att) =>
+      !att.notes?.includes("[AUTO-INJECT: SAKIT]") &&
+      !att.notes?.includes("[AUTO-INJECT: IZIN PRIBADI]"),
+  ).length;
   const totalBelum = totalPegawai - totalHadir;
 
   return (
@@ -141,7 +165,7 @@ export default function AdminMonitoring() {
           </div>
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-              Sudah Hadir
+              Total Terdata
             </p>
             <h3 className="text-3xl font-black text-gray-800">{totalHadir}</h3>
           </div>
@@ -155,7 +179,7 @@ export default function AdminMonitoring() {
           </div>
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-              Belum Hadir
+              Belum Terdata
             </p>
             <h3 className="text-3xl font-black text-gray-800">{totalBelum}</h3>
           </div>
@@ -189,16 +213,85 @@ export default function AdminMonitoring() {
                 </tr>
               ) : (
                 monitoringData.map((data, idx) => {
-                  const isHadir = !!data.absen?.check_in;
-                  const isPulang = !!data.absen?.check_out;
+                  const att = data.absen;
+                  const isHadir = !!att?.check_in;
+                  const isPulang = !!att?.check_out;
+                  const isAutoInject = data.isAutoInject;
+                  const note = (att?.notes || "").toUpperCase();
 
-                  // Cek apakah memenuhi target 8 jam
-                  const isTargetMet =
-                    data.absen?.status === "Memenuhi Target" ||
-                    data.absen?.total_hours >= 8;
+                  let statusBadge = (
+                    <span className="bg-red-50 text-red-500 px-3 py-1.5 rounded-full text-xs font-bold border border-red-100">
+                      Belum Datang
+                    </span>
+                  );
+                  let inTime = "--:--";
+                  let outTime = "--:--";
+                  let isTargetMet = false;
 
-                  // Penanda khusus untuk yang berstatus Izin/Sakit/Cuti
-                  const isLeave = data.absen?.is_leave;
+                  if (att) {
+                    if (isAutoInject) {
+                      // LOGIKA KHUSUS UNTUK YANG IZIN/CUTI
+                      if (note.includes("CUTI")) {
+                        statusBadge = (
+                          <span className="bg-purple-100 text-purple-600 px-3 py-1.5 rounded-full text-xs font-bold border border-purple-200">
+                            Cuti
+                          </span>
+                        );
+                        inTime = "07:00";
+                        outTime = "15:00";
+                        isTargetMet = true;
+                      } else if (note.includes("SAKIT")) {
+                        statusBadge = (
+                          <span className="bg-orange-100 text-orange-600 px-3 py-1.5 rounded-full text-xs font-bold border border-orange-200">
+                            Sakit
+                          </span>
+                        );
+                      } else if (note.includes("IZIN KEDINASAN")) {
+                        statusBadge = (
+                          <span className="bg-blue-100 text-blue-600 px-3 py-1.5 rounded-full text-xs font-bold border border-blue-200">
+                            Izin Kedinasan
+                          </span>
+                        );
+                        inTime = "07:00";
+                        outTime = "15:00";
+                        isTargetMet = true;
+                      } else if (note.includes("IZIN")) {
+                        statusBadge = (
+                          <span className="bg-blue-100 text-blue-600 px-3 py-1.5 rounded-full text-xs font-bold border border-blue-200">
+                            Izin Pribadi
+                          </span>
+                        );
+                      }
+                    } else if (isHadir) {
+                      // LOGIKA NORMAL UNTUK YANG HADIR FISIK
+                      inTime = format(getValidTime(att.check_in.time), "HH:mm");
+                      isTargetMet =
+                        att.status === "Memenuhi Target" ||
+                        att.total_hours >= 8;
+
+                      if (isPulang) {
+                        outTime = format(
+                          getValidTime(att.check_out.time),
+                          "HH:mm",
+                        );
+                        statusBadge = (
+                          <span className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-full text-xs font-bold border border-indigo-200">
+                            Selesai
+                          </span>
+                        );
+                      } else {
+                        statusBadge = (
+                          <span className="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-full text-xs font-bold border border-emerald-200 flex items-center justify-center w-fit mx-auto gap-1">
+                            Sedang Bekerja{" "}
+                            <span className="flex h-2 w-2 ml-1 relative">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                            </span>
+                          </span>
+                        );
+                      }
+                    }
+                  }
 
                   return (
                     <tr
@@ -218,45 +311,34 @@ export default function AdminMonitoring() {
                             : "Guru"}
                         </p>
                       </td>
-
-                      {/* ========================================== */}
-                      {/* PERBAIKAN: TAMPILAN JAM DATANG */}
-                      {/* ========================================== */}
                       <td className="p-5 text-center">
-                        {isHadir ? (
+                        <span
+                          className={`font-bold ${
+                            isAutoInject && inTime === "--:--"
+                              ? "text-orange-500"
+                              : isHadir || isAutoInject
+                              ? "text-emerald-600"
+                              : "text-gray-300 font-medium"
+                          }`}
+                        >
+                          {inTime}
+                        </span>
+                      </td>
+                      <td className="p-5 text-center">
+                        <div className="flex flex-col items-center gap-1">
                           <span
                             className={`font-bold ${
-                              isLeave ? "text-orange-500" : "text-emerald-600"
+                              isAutoInject && outTime === "--:--"
+                                ? "text-orange-500"
+                                : isPulang || isAutoInject
+                                ? "text-indigo-600"
+                                : "text-gray-300 font-medium"
                             }`}
                           >
-                            {format(
-                              getValidTime(data.absen.check_in.time),
-                              "HH:mm",
-                            )}
+                            {outTime}
                           </span>
-                        ) : (
-                          <span className="text-gray-300 font-medium">
-                            --:--
-                          </span>
-                        )}
-                      </td>
-
-                      {/* ========================================== */}
-                      {/* PERBAIKAN: TAMPILAN JAM PULANG */}
-                      {/* ========================================== */}
-                      <td className="p-5 text-center">
-                        {isPulang ? (
-                          <div className="flex flex-col items-center gap-1">
-                            <span
-                              className={`font-bold ${
-                                isLeave ? "text-orange-500" : "text-indigo-600"
-                              }`}
-                            >
-                              {format(
-                                getValidTime(data.absen.check_out.time),
-                                "HH:mm",
-                              )}
-                            </span>
+                          {/* Hanya tampilkan label Target/Kurang Jam jika ada jam pulangnya */}
+                          {outTime !== "--:--" && (
                             <span
                               className={`text-[9px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider border ${
                                 isTargetMet
@@ -266,37 +348,10 @@ export default function AdminMonitoring() {
                             >
                               {isTargetMet ? "Memenuhi Target" : "Kurang Jam"}
                             </span>
-                          </div>
-                        ) : (
-                          <span className="text-gray-300 font-medium">
-                            --:--
-                          </span>
-                        )}
+                          )}
+                        </div>
                       </td>
-
-                      <td className="p-5 text-center">
-                        {isLeave ? (
-                          <span className="bg-orange-50 text-orange-600 px-3 py-1.5 rounded-full text-xs font-bold border border-orange-200">
-                            {data.absen.status.toUpperCase()}
-                          </span>
-                        ) : isPulang ? (
-                          <span className="bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-full text-xs font-bold border border-indigo-200">
-                            Selesai
-                          </span>
-                        ) : isHadir ? (
-                          <span className="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-full text-xs font-bold border border-emerald-200 flex items-center justify-center w-fit mx-auto gap-1">
-                            Sedang Bekerja{" "}
-                            <span className="flex h-2 w-2 ml-1 relative">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                            </span>
-                          </span>
-                        ) : (
-                          <span className="bg-red-50 text-red-500 px-3 py-1.5 rounded-full text-xs font-bold border border-red-100">
-                            Belum Datang
-                          </span>
-                        )}
-                      </td>
+                      <td className="p-5 text-center">{statusBadge}</td>
                     </tr>
                   );
                 })

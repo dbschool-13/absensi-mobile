@@ -126,48 +126,54 @@ export const exportToExcel = async (
       cellDatang.alignment = { vertical: "middle", horizontal: "center" };
       cellPulang.alignment = { vertical: "middle", horizontal: "center" };
 
-      // Default font merah untuk kosong (strip)
+      // Default font merah untuk kosong (strip) jika belum absen
       cellDatang.font = { color: { argb: "FFFF0000" }, bold: true };
       cellPulang.font = { color: { argb: "FFFF0000" }, bold: true };
       cellDatang.value = "-";
       cellPulang.value = "-";
 
       if (absenHariIni) {
-        // Cek status target ATAU jika itu izin/sakit (kuning/oranye)
-        const isTargetMet =
-          absenHariIni.status === "Memenuhi Target" ||
-          absenHariIni.total_hours >= 8;
-        const isLeave = absenHariIni.is_leave;
+        // =========================================================
+        // LOGIKA BARU: BACA STATUS DARI NOTES
+        // =========================================================
+        const note = (absenHariIni.notes || "").toUpperCase();
+        const isAutoInject = note.includes("[AUTO-INJECT");
 
-        let colorArg = "FFFF0000"; // Default Merah
+        if (isAutoInject) {
+          // JIKA IZIN/SAKIT/CUTI
+          let leaveLabel = absenHariIni.status.toUpperCase();
+          const match = note.match(/\[AUTO-INJECT:\s(.*?)\]/);
+          if (match) leaveLabel = match[1];
 
-        if (isLeave) {
-          colorArg = "FFFFA500"; // Oranye jika Izin/Sakit/Cuti
-        } else if (isTargetMet) {
-          colorArg = "FF008000"; // Hijau jika Hadir Normal
-        }
+          // Merge sel jam datang & pulang untuk menuliskan nama Izinnya di tengah
+          worksheet.mergeCells(rowIndex, cIndex, rowIndex, cIndex + 1);
 
-        cellDatang.font = { color: { argb: colorArg }, bold: true };
-        cellPulang.font = { color: { argb: colorArg }, bold: true };
+          cellDatang.value = leaveLabel;
+          cellDatang.font = { color: { argb: "FFFFA500" }, bold: true }; // Warna Oranye
 
-        // ==========================================
-        // PERBAIKAN: GUNAKAN getValidTime()
-        // ==========================================
-        if (absenHariIni.check_in?.time) {
-          const jamMasukValid = getValidTime(absenHariIni.check_in.time);
-          if (jamMasukValid) {
-            cellDatang.value = isLeave
-              ? absenHariIni.status.toUpperCase()
-              : format(jamMasukValid, "HH:mm");
+          // cellPulang tidak perlu diisi karena sudah di-merge ke cellDatang
+        } else {
+          // JIKA HADIR NORMAL DI SEKOLAH
+          const isTargetMet =
+            absenHariIni.status === "Memenuhi Target" ||
+            absenHariIni.total_hours >= 8;
+          const colorArg = isTargetMet ? "FF008000" : "FFFF0000"; // Hijau jika tuntas, Merah jika kurang
+
+          cellDatang.font = { color: { argb: colorArg }, bold: true };
+          cellPulang.font = { color: { argb: colorArg }, bold: true };
+
+          if (absenHariIni.check_in?.time) {
+            const jamMasukValid = getValidTime(absenHariIni.check_in.time);
+            if (jamMasukValid) {
+              cellDatang.value = format(jamMasukValid, "HH:mm");
+            }
           }
-        }
 
-        if (absenHariIni.check_out?.time) {
-          const jamPulangValid = getValidTime(absenHariIni.check_out.time);
-          if (jamPulangValid) {
-            cellPulang.value = isLeave
-              ? absenHariIni.status.toUpperCase()
-              : format(jamPulangValid, "HH:mm");
+          if (absenHariIni.check_out?.time) {
+            const jamPulangValid = getValidTime(absenHariIni.check_out.time);
+            if (jamPulangValid) {
+              cellPulang.value = format(jamPulangValid, "HH:mm");
+            }
           }
         }
 
@@ -178,7 +184,7 @@ export const exportToExcel = async (
     });
 
     // Total Jam & Kekurangan Jam
-    const targetJamSeminggu = weekDates.length * 8; // 8 jam x jumlah hari (biasanya 5)
+    const targetJamSeminggu = weekDates.length * 8;
     const kekurangan = targetJamSeminggu - totalJamKerja;
 
     const totalCell = row.getCell(cIndex);
@@ -189,7 +195,7 @@ export const exportToExcel = async (
     const kurangCell = row.getCell(cIndex + 1);
     kurangCell.value = kekurangan > 0 ? parseFloat(kekurangan.toFixed(1)) : 0;
     kurangCell.alignment = { vertical: "middle", horizontal: "center" };
-    kurangCell.font = { color: { argb: "FFFF0000" }, bold: true }; // Kekurangan jam selalu merah
+    kurangCell.font = { color: { argb: "FFFF0000" }, bold: true };
 
     // Terapkan border ke seluruh baris
     row.eachCell({ includeEmpty: true }, (cell) => {

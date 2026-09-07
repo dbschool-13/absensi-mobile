@@ -1,6 +1,8 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
+// IMPORT TAMBAHAN: panggil leaveService untuk mengecek pengajuan
+import { leaveService } from "../../services/leaveService";
 import {
   LayoutDashboard,
   FileSpreadsheet,
@@ -9,6 +11,7 @@ import {
   School,
   Settings,
   Activity,
+  Bell, // Icon tambahan opsional jika ingin mengubah icon approve
 } from "lucide-react";
 import GlobalLoader from "../ui/GlobalLoader";
 
@@ -16,10 +19,34 @@ export default function AdminLayout() {
   const { user, schoolData, logout, setGlobalLoading } = useAuth();
   const navigate = useNavigate();
 
+  // STATE BARU: Untuk menyimpan jumlah pengajuan yang belum diproses
+  const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
+
   const handleLogout = () => {
     logout();
     navigate("/login");
   };
+
+  // EFFECT BARU: Mengecek pengajuan izin secara berkala
+  useEffect(() => {
+    if (!user?.school_id) return;
+
+    const fetchPendingCount = async () => {
+      try {
+        const data = await leaveService.getPendingRequests(user.school_id);
+        setPendingLeaveCount(data.length);
+      } catch (error) {
+        console.error("Gagal menarik notifikasi pengajuan:", error);
+      }
+    };
+
+    // Panggil sekali saat aplikasi pertama kali dimuat
+    fetchPendingCount();
+
+    // Jalankan pengecekan otomatis di latar belakang setiap 15 detik (Real-time feeling)
+    const interval = setInterval(fetchPendingCount, 15000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   const navItemClass = ({ isActive }) =>
     `flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-semibold ${
@@ -74,8 +101,18 @@ export default function AdminLayout() {
           <NavLink to="/admin/guru" className={navItemClass}>
             <Users size={20} /> Data Guru
           </NavLink>
+
+          {/* PERBAIKAN: Menu Approve Pengajuan dengan Lencana Notifikasi */}
           <NavLink to="/admin/verifikasi-izin" className={navItemClass}>
-            <Users size={20} /> Approve Pengajuan
+            <Bell size={20} />
+            <span className="flex-1">Approve Pengajuan</span>
+
+            {/* Tampilkan Lencana (Badge) Merah jika ada pengajuan */}
+            {pendingLeaveCount > 0 && (
+              <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-md animate-pulse">
+                {pendingLeaveCount}
+              </span>
+            )}
           </NavLink>
         </nav>
 
