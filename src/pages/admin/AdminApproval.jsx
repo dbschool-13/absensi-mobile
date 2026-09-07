@@ -2,6 +2,9 @@ import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { leaveService } from "../../services/leaveService";
 import { adminService } from "../../services/adminService";
+// IMPORT TAMBAHAN UNTUK REAL-TIME FIREBASE
+import { db } from "../../services/firebase";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import toast from "react-hot-toast";
 import {
   CheckCircle,
@@ -17,42 +20,60 @@ import { id } from "date-fns/locale";
 
 export default function AdminApproval() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState("pending"); // "pending" atau "history"
+  const [activeTab, setActiveTab] = useState("pending");
 
   const [pendingRequests, setPendingRequests] = useState([]);
-  const [resolvedRequests, setResolvedRequests] = useState([]); // State untuk Riwayat
+  const [resolvedRequests, setResolvedRequests] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [selectedImage, setSelectedImage] = useState(null);
 
+  // ==========================================================
+  // PERBAIKAN: LISTENER REAL-TIME FIREBASE (ON SNAPSHOT)
+  // ==========================================================
   useEffect(() => {
-    fetchData();
+    if (!user?.school_id) return;
+
+    setLoading(true);
+
+    // 1. Tarik data guru (cukup sekali di awal karena jarang berubah)
+    adminService.getTeachers(user.school_id).then((teachersData) => {
+      setTeachers(teachersData);
+    });
+
+    // 2. Pasang Telinga (Listener) Real-time ke tabel leave_requests
+    const q = query(
+      collection(db, "leave_requests"),
+      where("school_id", "==", user.school_id),
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const pending = [];
+      const resolved = [];
+
+      snapshot.forEach((doc) => {
+        const data = { id: doc.id, ...doc.data() };
+        if (data.status === "pending") {
+          pending.push(data);
+        } else if (data.status === "approved" || data.status === "rejected") {
+          resolved.push(data);
+        }
+      });
+
+      // Urutkan: Pending (yang paling lama menunggu di atas), Resolved (yang baru diproses di atas)
+      pending.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+      resolved.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+      setPendingRequests(pending);
+      setResolvedRequests(resolved);
+      setLoading(false);
+    });
+
+    // Bersihkan listener jika admin pindah halaman
+    return () => unsubscribe();
   }, [user]);
-
-  const fetchData = async () => {
-    if (user?.school_id) {
-      setLoading(true);
-      try {
-        // Tarik data pending, riwayat, dan daftar guru secara serentak
-        const [reqData, resolvedData, teachersData] = await Promise.all([
-          leaveService.getPendingRequests(user.school_id),
-          leaveService.getResolvedRequests(user.school_id),
-          adminService.getTeachers(user.school_id),
-        ]);
-
-        setPendingRequests(reqData);
-        setResolvedRequests(resolvedData);
-        setTeachers(teachersData);
-      } catch (error) {
-        console.error("Error fetching data:", error);
-        toast.error("Gagal memuat data");
-      } finally {
-        setLoading(false);
-      }
-    }
-  };
 
   const handleApprove = async (requestData) => {
     const isConfirm = window.confirm(
@@ -69,7 +90,7 @@ export default function AdminApproval() {
 
     if (success) {
       toast.success("Disetujui! Absen berhasil disuntikkan.", { id: toastId });
-      fetchData();
+      // Tidak perlu lagi memanggil fetchData() karena onSnapshot akan memindahkannya secara otomatis
     } else {
       toast.error("Gagal menyetujui pengajuan.", { id: toastId });
     }
@@ -87,7 +108,7 @@ export default function AdminApproval() {
 
     if (success) {
       toast.success("Pengajuan ditolak.", { id: toastId });
-      fetchData();
+      // Tidak perlu lagi memanggil fetchData()
     } else {
       toast.error("Gagal menolak pengajuan.", { id: toastId });
     }
@@ -111,7 +132,7 @@ export default function AdminApproval() {
             Manajemen Izin & Cuti
           </h1>
           <p className="text-gray-500 mt-1 font-medium flex items-center gap-2">
-            Kelola persetujuan ketidakhadiran pegawai
+            Kelola persetujuan ketidakhadiran pegawai secara *Real-Time*
           </p>
         </div>
 
@@ -167,7 +188,7 @@ export default function AdminApproval() {
                     className="p-12 text-center text-gray-400 font-medium"
                   >
                     <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-                    Memuat data...
+                    Menghubungkan ke Server Live...
                   </td>
                 </tr>
               ) : currentData.length === 0 ? (
@@ -272,7 +293,6 @@ export default function AdminApproval() {
                       )}
                     </td>
 
-                    {/* KOLOM AKSI / STATUS TERGANTUNG TAB AKTIF */}
                     <td className="p-5 text-center">
                       {activeTab === "pending" ? (
                         <div className="flex items-center justify-center gap-2">
