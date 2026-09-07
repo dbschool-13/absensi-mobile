@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { leaveService } from "../../services/leaveService";
 import { adminService } from "../../services/adminService";
-// IMPORT TAMBAHAN UNTUK REAL-TIME FIREBASE
 import { db } from "../../services/firebase";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import toast from "react-hot-toast";
@@ -14,6 +13,7 @@ import {
   X,
   History,
   Clock,
+  ZoomIn,
 } from "lucide-react";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
@@ -30,20 +30,15 @@ export default function AdminApproval() {
 
   const [selectedImage, setSelectedImage] = useState(null);
 
-  // ==========================================================
-  // PERBAIKAN: LISTENER REAL-TIME FIREBASE (ON SNAPSHOT)
-  // ==========================================================
   useEffect(() => {
     if (!user?.school_id) return;
 
     setLoading(true);
 
-    // 1. Tarik data guru (cukup sekali di awal karena jarang berubah)
     adminService.getTeachers(user.school_id).then((teachersData) => {
       setTeachers(teachersData);
     });
 
-    // 2. Pasang Telinga (Listener) Real-time ke tabel leave_requests
     const q = query(
       collection(db, "leave_requests"),
       where("school_id", "==", user.school_id),
@@ -62,7 +57,6 @@ export default function AdminApproval() {
         }
       });
 
-      // Urutkan: Pending (yang paling lama menunggu di atas), Resolved (yang baru diproses di atas)
       pending.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       resolved.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
@@ -71,7 +65,6 @@ export default function AdminApproval() {
       setLoading(false);
     });
 
-    // Bersihkan listener jika admin pindah halaman
     return () => unsubscribe();
   }, [user]);
 
@@ -90,7 +83,6 @@ export default function AdminApproval() {
 
     if (success) {
       toast.success("Disetujui! Absen berhasil disuntikkan.", { id: toastId });
-      // Tidak perlu lagi memanggil fetchData() karena onSnapshot akan memindahkannya secara otomatis
     } else {
       toast.error("Gagal menyetujui pengajuan.", { id: toastId });
     }
@@ -108,7 +100,6 @@ export default function AdminApproval() {
 
     if (success) {
       toast.success("Pengajuan ditolak.", { id: toastId });
-      // Tidak perlu lagi memanggil fetchData()
     } else {
       toast.error("Gagal menolak pengajuan.", { id: toastId });
     }
@@ -333,26 +324,35 @@ export default function AdminApproval() {
         </div>
       </div>
 
-      {/* MODAL LIHAT SURAT */}
+      {/* ========================================== */}
+      {/* MODAL LIHAT SURAT (Diperbesar Ekstra)      */}
+      {/* ========================================== */}
       {selectedImage && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-[slideUp_0.3s_ease-out]">
-            <div className="px-6 py-4 flex justify-between items-center border-b border-gray-100">
-              <h3 className="text-lg font-black text-gray-800">
-                Lampiran Dokumen
-              </h3>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/85 backdrop-blur-sm p-4 md:p-8">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl flex flex-col overflow-hidden animate-[slideUp_0.3s_ease-out] max-h-[95vh]">
+            {/* Header Modal */}
+            <div className="px-6 py-4 flex justify-between items-center border-b border-gray-100 flex-shrink-0 bg-white">
+              <div className="flex items-center gap-2 text-gray-800">
+                <ZoomIn size={22} className="text-primary" />
+                <h3 className="text-lg font-black tracking-tight">
+                  Pratinjau Lampiran
+                </h3>
+              </div>
               <button
                 onClick={() => setSelectedImage(null)}
                 className="p-2 bg-gray-50 text-gray-500 hover:bg-red-50 hover:text-red-500 rounded-full transition-colors"
+                title="Tutup (Esc)"
               >
                 <X size={20} />
               </button>
             </div>
-            <div className="p-6 bg-gray-50 flex justify-center">
+
+            {/* Container Gambar (Bisa Scroll jika terlalu panjang) */}
+            <div className="p-4 md:p-8 bg-gray-100 flex-1 flex justify-center items-center overflow-auto">
               <img
                 src={selectedImage}
                 alt="Bukti Lampiran"
-                className="max-h-[60vh] object-contain rounded-xl border border-gray-200 shadow-sm"
+                className="max-h-[80vh] w-auto object-contain rounded-xl shadow-lg border border-gray-200/50 bg-white"
               />
             </div>
           </div>
