@@ -150,17 +150,18 @@ export default function Riwayat() {
             const dateObj = parseISO(item.date);
 
             // ==========================================
-            // LOGIKA BARU: MEMBACA STATUS IZIN & BADGES
+            // LOGIKA BARU: BACA ABSEN NORMAL VS INJEKSI
             // ==========================================
             const note = (item.notes || "").toUpperCase();
             const isAutoInject = note.includes("[AUTO-INJECT");
+            const isCompleted =
+              item.status === "Memenuhi Target" || item.total_hours >= 8;
 
-            let badgeLabel =
-              item.status === "Memenuhi Target" ? "Hadir" : item.status;
-            let badgeClass =
-              "bg-emerald-50 text-emerald-600 border-emerald-200";
+            let badgeLabel = "";
+            let badgeClass = "";
 
             if (isAutoInject) {
+              // Jika ini adalah absen hasil pengajuan Izin/Sakit/Cuti
               if (note.includes("CUTI")) {
                 badgeLabel = "Cuti";
                 badgeClass = "bg-purple-50 text-purple-600 border-purple-200";
@@ -177,17 +178,22 @@ export default function Riwayat() {
                 badgeLabel = "Izin Pribadi";
                 badgeClass = "bg-blue-50 text-blue-600 border-blue-200";
               }
-            } else if (item.status === "Belum Pulang") {
-              badgeClass = "bg-blue-50 text-blue-600 border-blue-200";
-            } else if (item.status === "Kurang Jam" || item.status === "late") {
-              badgeClass = "bg-red-50 text-red-600 border-red-200";
-              if (item.status === "late") badgeLabel = "Terlambat";
+            } else {
+              // Jika ini adalah absen fisik biasa
+              if (!item.check_out) {
+                badgeLabel = "Belum Pulang";
+                badgeClass = "bg-blue-50 text-blue-600 border-blue-200";
+              } else if (isCompleted) {
+                badgeLabel = "Memenuhi Target";
+                badgeClass =
+                  "bg-emerald-50 text-emerald-600 border-emerald-200";
+              } else {
+                badgeLabel = "Belum Memenuhi Target";
+                badgeClass = "bg-red-50 text-red-600 border-red-200";
+              }
             }
 
-            const isCompleted =
-              item.status === "Memenuhi Target" || item.total_hours >= 8;
-
-            // Logika Menghitung Kekurangan Jam (Hanya berlaku untuk absen normal, bukan auto-inject 0 jam)
+            // Logika Menghitung Kekurangan Jam (Hanya untuk absen normal yang kurang dari 8 jam)
             let shortText = null;
             if (
               item.check_out &&

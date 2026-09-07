@@ -366,7 +366,7 @@ export default function AdminSetting() {
           <div className="grid grid-cols-2 gap-6">
             <div className="space-y-3">
               <p className="text-xs font-bold text-gray-500 uppercase">
-                Jam Masuk
+                Jam Datang
               </p>
               <div>
                 <label className="block text-[10px] text-gray-400 mb-1">
@@ -396,7 +396,7 @@ export default function AdminSetting() {
 
             <div className="space-y-3">
               <p className="text-xs font-bold text-gray-500 uppercase">
-                Jam Keluar
+                Jam Pulang
               </p>
               <div>
                 <label className="block text-[10px] text-gray-400 mb-1">

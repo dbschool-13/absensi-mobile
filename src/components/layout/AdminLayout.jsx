@@ -95,14 +95,9 @@ export default function AdminLayout() {
           <NavLink to="/admin/rekap" className={navItemClass}>
             <FileSpreadsheet size={20} /> Rekap & Export
           </NavLink>
-          <NavLink to="/admin/setting" className={navItemClass}>
-            <Settings size={20} /> Pengaturan
-          </NavLink>
           <NavLink to="/admin/guru" className={navItemClass}>
             <Users size={20} /> Data Guru
           </NavLink>
-
-          {/* PERBAIKAN: Menu Approve Pengajuan dengan Lencana Notifikasi */}
           <NavLink to="/admin/verifikasi-izin" className={navItemClass}>
             <Bell size={20} />
             <span className="flex-1">Approve Pengajuan</span>
@@ -113,6 +108,9 @@ export default function AdminLayout() {
                 {pendingLeaveCount}
               </span>
             )}
+          </NavLink>
+          <NavLink to="/admin/setting" className={navItemClass}>
+            <Settings size={20} /> Pengaturan
           </NavLink>
         </nav>
 
