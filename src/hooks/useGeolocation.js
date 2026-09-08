@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Geolocation } from "@capacitor/geolocation";
 import { Capacitor } from "@capacitor/core";
 
@@ -6,9 +6,13 @@ export const useGeolocation = () => {
   const [location, setLocation] = useState({
     latitude: null,
     longitude: null,
+    accuracy: null, // TAMBAHAN: Memantau radius keakuratan GPS dalam satuan meter
     error: null,
     loading: true,
   });
+
+  // Gunakan ref untuk melacak ID pantauan agar pembersihan memori (cleanup) lebih aman
+  const watchIdRef = useRef(null);
 
   // Fungsi untuk Memaksa Refresh Lokasi (Bisa dipanggil dari tombol)
   const refreshLocation = useCallback(async () => {
@@ -19,48 +23,56 @@ export const useGeolocation = () => {
         if (permission.location !== "granted") {
           setLocation((prev) => ({
             ...prev,
-            error: "Izin lokasi ditolak",
+            error: "Izin lokasi ditolak. Buka Pengaturan HP untuk mengizinkan.",
             loading: false,
           }));
           return;
         }
       }
 
-      // Ambil posisi SEKALI SAJA dengan paksaan akurasi tinggi dan TANPA CACHE
+      // Ambil posisi SEKALI SAJA
+      // Timeout diperpanjang jadi 20 detik agar hardware GPS punya waktu pemanasan
       const position = await Geolocation.getCurrentPosition({
         enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0, // 0 = Paksa ambil dari satelit langsung, bukan history HP
+        timeout: 20000,
+        maximumAge: 0,
       });
+
+      const acc = position.coords.accuracy;
 
       setLocation({
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
-        error: null,
+        accuracy: acc,
+        // Beri peringatan jika akurasi lebih dari 60 meter (sinyal masih menebak-nebak)
+        error:
+          acc > 60 ? "Sinyal satelit lemah, mencari posisi presisi..." : null,
         loading: false,
       });
     } catch (error) {
       setLocation((prev) => ({
         ...prev,
-        error: error.message,
+        error: "Gagal mengunci GPS. Harap ke ruang terbuka/luar gedung.",
         loading: false,
       }));
     }
   }, []);
 
   useEffect(() => {
-    let watchId = null;
+    let isMounted = true;
 
     const startWatching = async () => {
       try {
         if (Capacitor.isNativePlatform()) {
           const permission = await Geolocation.requestPermissions();
           if (permission.location !== "granted") {
-            setLocation((prev) => ({
-              ...prev,
-              error: "Izin lokasi ditolak",
-              loading: false,
-            }));
+            if (isMounted) {
+              setLocation((prev) => ({
+                ...prev,
+                error: "Izin lokasi ditolak.",
+                loading: false,
+              }));
+            }
             return;
           }
         }
@@ -68,40 +80,68 @@ export const useGeolocation = () => {
         // Panggil refresh pertama kali buka aplikasi
         refreshLocation();
 
-        // Pantau pergerakan dengan setting yang lebih agresif
-        watchId = await Geolocation.watchPosition(
-          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+        // Pantau pergerakan secara Live
+        const id = await Geolocation.watchPosition(
+          { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 },
           (position, err) => {
+            if (!isMounted) return;
+
             if (position) {
-              setLocation({
-                latitude: position.coords.latitude,
-                longitude: position.coords.longitude,
-                error: null,
-                loading: false,
+              const acc = position.coords.accuracy;
+
+              setLocation((prev) => {
+                // ================================================================
+                // LOGIKA ANTI-LONCATAN (JUMP PROTECTOR)
+                // Jika lokasi sebelumnya sudah sangat akurat (< 50 meter),
+                // lalu HP tiba-tiba mengirim data jelek (> 100 meter) karena guru
+                // masuk ke dalam gedung tertutup, TOLAK data jelek tersebut!
+                // ================================================================
+                if (prev.accuracy && prev.accuracy < 50 && acc > 100) {
+                  return prev; // Abaikan data baru, pertahankan titik lama yang presisi
+                }
+
+                return {
+                  latitude: position.coords.latitude,
+                  longitude: position.coords.longitude,
+                  accuracy: acc,
+                  // Tampilkan peringatan transparan jika satelit masih ngawur
+                  error:
+                    acc > 80
+                      ? `Sinyal lemah (Melenceng ~${Math.round(acc)}m)`
+                      : null,
+                  loading: false,
+                };
               });
             } else if (err) {
+              // Jika putus sinyal sesaat, jangan hapus koordinat yang sudah ada
               setLocation((prev) => ({
                 ...prev,
-                error: err.message,
-                loading: false,
+                error: prev.latitude ? prev.error : "Mencari satelit GPS...",
+                loading: prev.latitude ? false : true,
               }));
             }
           },
         );
+
+        watchIdRef.current = id;
       } catch (error) {
-        setLocation((prev) => ({
-          ...prev,
-          error: error.message,
-          loading: false,
-        }));
+        if (isMounted) {
+          setLocation((prev) => ({
+            ...prev,
+            error: "Modul GPS bermasalah.",
+            loading: false,
+          }));
+        }
       }
     };
 
     startWatching();
 
+    // Pembersihan saat komponen ditutup
     return () => {
-      if (watchId != null) {
-        Geolocation.clearWatch({ id: watchId });
+      isMounted = false;
+      if (watchIdRef.current != null) {
+        Geolocation.clearWatch({ id: watchIdRef.current });
       }
     };
   }, [refreshLocation]);
