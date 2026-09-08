@@ -196,6 +196,7 @@ export default function Dashboard() {
             data.distance,
             null,
             data.timestamp,
+            true
           );
         } else {
           await attendanceService.checkOut(
@@ -206,6 +207,7 @@ export default function Dashboard() {
             data.checkInTime,
             null,
             data.timestamp,
+            true,
           );
         }
         newQueue = newQueue.filter((item) => item.id !== data.id);

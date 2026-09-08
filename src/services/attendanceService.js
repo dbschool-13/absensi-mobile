@@ -1,5 +1,9 @@
 import { db } from "./firebase";
 import {
+  collection,
+  query,
+  where,
+  getDocs,
   doc,
   getDoc,
   setDoc,
@@ -8,6 +12,39 @@ import {
 } from "firebase/firestore";
 import { getTodayString, calculateWorkHours } from "../utils/timeUtils";
 import toast from "react-hot-toast";
+import { format } from "date-fns";
+
+// =================================================================
+// HAKIM MUTLAK: Mengambil waktu langsung dari satelit sedetik
+// sebelum data dimasukkan ke Database (Mengabaikan jam dari HP)
+// =================================================================
+const getAbsoluteTrueTime = async (fallbackTime) => {
+  try {
+    const res = await fetch(
+      `https://timeapi.io/api/Time/current/zone?timeZone=UTC&nocache=${Date.now()}`,
+      { cache: "no-store" },
+    );
+    if (res.ok) {
+      const data = await res.json();
+      return new Date(data.dateTime + "Z").toISOString();
+    }
+    throw new Error("S1 Gagal");
+  } catch (err) {
+    try {
+      const res2 = await fetch(
+        `https://worldtimeapi.org/api/timezone/Etc/UTC?nocache=${Date.now()}`,
+        { cache: "no-store" },
+      );
+      if (res2.ok) {
+        const data2 = await res2.json();
+        return new Date(data2.datetime).toISOString();
+      }
+    } catch (e) {
+      return fallbackTime;
+    }
+  }
+  return fallbackTime;
+};
 
 export const attendanceService = {
   // 1. Ambil status absen hari ini
@@ -18,7 +55,7 @@ export const attendanceService = {
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
-        return docSnap.data();
+        return { id: docSnap.id, ...docSnap.data() };
       }
       return null;
     } catch (error) {
@@ -27,7 +64,7 @@ export const attendanceService = {
     }
   },
 
-  // 2. Proses Absen Datang
+  // 2. Proses Absen Datang (Ditambah param clientTimestamp & isOfflineSync)
   checkIn: async (
     userId,
     schoolId,
@@ -35,21 +72,31 @@ export const attendanceService = {
     longitude,
     distance,
     photoUrl,
+    clientTimestamp = new Date().toISOString(),
+    isOfflineSync = false,
   ) => {
     try {
-      const dateStr = getTodayString();
-      const docId = `${userId}_${dateStr}`;
+      // VALIDASI FINAL TINGKAT DEWA
+      let finalTimeStr = clientTimestamp;
+      if (!isOfflineSync && navigator.onLine) {
+        finalTimeStr = await getAbsoluteTrueTime(clientTimestamp);
+      }
+
+      const absoluteDateObj = new Date(finalTimeStr);
+      // Kita menggunakan tanggal dari server satelit agar user tidak bisa memanipulasi hari (misal mengubah HP ke hari kemarin)
+      const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
+
+      const docId = `${userId}_${trueDateStr}`;
       const docRef = doc(db, "attendances", docId);
 
-      // Deteksi device sederhana
       const deviceInfo = navigator.userAgent;
 
       const payload = {
         user_id: userId,
         school_id: schoolId,
-        date: dateStr,
+        date: trueDateStr,
         check_in: {
-          time: new Date(), // Simpan Waktu JS, diubah oleh Firestore
+          time: finalTimeStr, // Waktu murni anti-hack
           latitude,
           longitude,
           distance_meters: distance,
@@ -59,14 +106,16 @@ export const attendanceService = {
         check_out: null,
         total_hours: 0,
         status: "Belum Pulang",
+        is_offline_sync: isOfflineSync,
+        server_created_at: serverTimestamp(), // Stempel forensik Firebase
       };
 
-      await setDoc(docRef, payload);
-      toast.success("Berhasil Absen Datang!");
+      await setDoc(docRef, payload, { merge: true });
+      if (!isOfflineSync) toast.success("Berhasil Absen Datang!");
       return payload;
     } catch (error) {
       console.error("CheckIn error:", error);
-      toast.error("Gagal melakukan Absen Datang.");
+      if (!isOfflineSync) toast.error("Gagal melakukan Absen Datang.");
       return null;
     }
   },
@@ -79,25 +128,32 @@ export const attendanceService = {
     distance,
     checkInTime,
     photoUrl,
+    clientTimestamp = new Date().toISOString(),
+    isOfflineSync = false,
   ) => {
     try {
-      const docId = `${userId}_${getTodayString()}`;
+      // VALIDASI FINAL TINGKAT DEWA
+      let finalTimeStr = clientTimestamp;
+      if (!isOfflineSync && navigator.onLine) {
+        finalTimeStr = await getAbsoluteTrueTime(clientTimestamp);
+      }
+
+      const absoluteDateObj = new Date(finalTimeStr);
+      const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
+
+      const docId = `${userId}_${trueDateStr}`;
       const docRef = doc(db, "attendances", docId);
 
-      const checkOutDate = new Date();
-      // Konversi checkInTime dari Firestore Timestamp ke JS Date (jika diperlukan)
       const checkInDate = checkInTime?.toDate
         ? checkInTime.toDate()
         : new Date(checkInTime);
 
-      // Hitung total jam
-      const totalHours = calculateWorkHours(checkInDate, checkOutDate);
-      const finalStatus =
-        totalHours >= 8 ? "Memenuhi Target" : "Belum Memenuhi Target";
+      const totalHours = calculateWorkHours(checkInDate, absoluteDateObj);
+      const finalStatus = totalHours >= 8 ? "Memenuhi Target" : "Kurang Jam";
 
       const payloadUpdate = {
         check_out: {
-          time: checkOutDate,
+          time: finalTimeStr, // Waktu murni anti-hack
           latitude,
           longitude,
           distance_meters: distance,
@@ -105,14 +161,16 @@ export const attendanceService = {
         },
         total_hours: totalHours,
         status: finalStatus,
+        is_offline_sync_out: isOfflineSync,
+        server_updated_at: serverTimestamp(),
       };
 
       await updateDoc(docRef, payloadUpdate);
-      toast.success("Berhasil Absen Pulang!");
+      if (!isOfflineSync) toast.success("Berhasil Absen Pulang!");
       return payloadUpdate;
     } catch (error) {
       console.error("CheckOut error:", error);
-      toast.error("Gagal melakukan Absen Pulang.");
+      if (!isOfflineSync) toast.error("Gagal melakukan Absen Pulang.");
       return null;
     }
   },
@@ -120,11 +178,6 @@ export const attendanceService = {
   // 4. Ambil Riwayat Absen berdasarkan Bulan & Tahun
   getHistory: async (userId, month, year) => {
     try {
-      const { collection, query, where, getDocs } = await import(
-        "firebase/firestore"
-      );
-
-      // Ambil semua absen milik user ini (Menghindari error Composite Index Firebase)
       const q = query(
         collection(db, "attendances"),
         where("user_id", "==", userId),
@@ -133,18 +186,15 @@ export const attendanceService = {
       const querySnapshot = await getDocs(q);
       const history = [];
 
-      // Format awalan tanggal pencarian. Contoh: "2023-10"
       const searchPrefix = `${year}-${month}`;
 
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        // Filter manual: Masukkan hanya data yang tanggalnya berawalan "YYYY-MM"
         if (data.date && data.date.startsWith(searchPrefix)) {
           history.push({ id: doc.id, ...data });
         }
       });
 
-      // Urutkan dari tanggal terbaru (descending)
       return history.sort((a, b) => b.date.localeCompare(a.date));
     } catch (error) {
       console.error("Error fetching history:", error);
