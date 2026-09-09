@@ -6,15 +6,16 @@ export const useGeolocation = () => {
   const [location, setLocation] = useState({
     latitude: null,
     longitude: null,
-    accuracy: null, // TAMBAHAN: Memantau radius keakuratan GPS dalam satuan meter
+    accuracy: null,
     error: null,
     loading: true,
   });
 
-  // Gunakan ref untuk melacak ID pantauan agar pembersihan memori (cleanup) lebih aman
   const watchIdRef = useRef(null);
 
-  // Fungsi untuk Memaksa Refresh Lokasi (Bisa dipanggil dari tombol)
+  // =====================================================================
+  // 1. FUNGSI PAKSA REFRESH (Panggil manual lewat tombol di UI)
+  // =====================================================================
   const refreshLocation = useCallback(async () => {
     setLocation((prev) => ({ ...prev, loading: true, error: null }));
     try {
@@ -30,8 +31,6 @@ export const useGeolocation = () => {
         }
       }
 
-      // Ambil posisi SEKALI SAJA
-      // Timeout diperpanjang jadi 20 detik agar hardware GPS punya waktu pemanasan
       const position = await Geolocation.getCurrentPosition({
         enableHighAccuracy: true,
         timeout: 20000,
@@ -44,7 +43,6 @@ export const useGeolocation = () => {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
         accuracy: acc,
-        // Beri peringatan jika akurasi lebih dari 60 meter (sinyal masih menebak-nebak)
         error:
           acc > 60 ? "Sinyal satelit lemah, mencari posisi presisi..." : null,
         loading: false,
@@ -58,8 +56,12 @@ export const useGeolocation = () => {
     }
   }, []);
 
+  // =====================================================================
+  // 2. FUNGSI PANTAU OTOMATIS (Berjalan di latar belakang)
+  // =====================================================================
   useEffect(() => {
     let isMounted = true;
+    let jumpTimeout = null; // Timer pelepasan Jump Protector
 
     const startWatching = async () => {
       try {
@@ -77,7 +79,7 @@ export const useGeolocation = () => {
           }
         }
 
-        // Panggil refresh pertama kali buka aplikasi
+        // Pancingan awal agar tidak kosong
         refreshLocation();
 
         // Pantau pergerakan secara Live
@@ -91,20 +93,34 @@ export const useGeolocation = () => {
 
               setLocation((prev) => {
                 // ================================================================
-                // LOGIKA ANTI-LONCATAN (JUMP PROTECTOR)
-                // Jika lokasi sebelumnya sudah sangat akurat (< 50 meter),
-                // lalu HP tiba-tiba mengirim data jelek (> 100 meter) karena guru
-                // masuk ke dalam gedung tertutup, TOLAK data jelek tersebut!
+                // SMART JUMP PROTECTOR
+                // Jika lokasi loncat jelek (> 100m) tapi sebelumnya bagus (< 50m),
+                // tolak data baru tersebut selama maksimal 10 DETIK.
+                // Jika setelah 10 detik datanya masih jelek, berarti guru memang pindah.
                 // ================================================================
                 if (prev.accuracy && prev.accuracy < 50 && acc > 100) {
-                  return prev; // Abaikan data baru, pertahankan titik lama yang presisi
+                  // Jika belum ada timer, buat timer 10 detik
+                  if (!jumpTimeout) {
+                    jumpTimeout = setTimeout(() => {
+                      // Setelah 10 detik berlalu, reset akurasi agar sistem mau menerima lokasi jelek
+                      setLocation((p) => ({ ...p, accuracy: 999 }));
+                      jumpTimeout = null;
+                    }, 10000);
+                  }
+
+                  return prev; // Pertahankan titik lama
+                }
+
+                // Jika data yang masuk bagus, hapus timer (jika ada)
+                if (acc <= 100 && jumpTimeout) {
+                  clearTimeout(jumpTimeout);
+                  jumpTimeout = null;
                 }
 
                 return {
                   latitude: position.coords.latitude,
                   longitude: position.coords.longitude,
                   accuracy: acc,
-                  // Tampilkan peringatan transparan jika satelit masih ngawur
                   error:
                     acc > 80
                       ? `Sinyal lemah (Melenceng ~${Math.round(acc)}m)`
@@ -113,7 +129,6 @@ export const useGeolocation = () => {
                 };
               });
             } else if (err) {
-              // Jika putus sinyal sesaat, jangan hapus koordinat yang sudah ada
               setLocation((prev) => ({
                 ...prev,
                 error: prev.latitude ? prev.error : "Mencari satelit GPS...",
@@ -137,14 +152,19 @@ export const useGeolocation = () => {
 
     startWatching();
 
-    // Pembersihan saat komponen ditutup
+    // =====================================================================
+    // 3. PEMBERSIHAN MEMORI (Mencegah HP Panas / Memory Leak)
+    // =====================================================================
     return () => {
       isMounted = false;
+      if (jumpTimeout) clearTimeout(jumpTimeout);
+
+      // Menggunakan identifier yang benar untuk membersihkan WatchPosition di Capacitor
       if (watchIdRef.current != null) {
         Geolocation.clearWatch({ id: watchIdRef.current });
       }
     };
-  }, [refreshLocation]);
+  }, []); // <-- PERBAIKAN KRITIS: Dependency dikosongkan agar Effect hanya berjalan 1x saat komponen dipasang
 
   return { ...location, refreshLocation };
 };
