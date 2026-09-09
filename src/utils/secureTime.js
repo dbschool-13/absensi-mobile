@@ -1,14 +1,13 @@
 let timeOffset = 0;
 let isSynced = false;
 let serverValidated = false;
-let isSyncing = false; // Kunci agar tidak bentrok/spam request ke server saat HP baru bangun
+let isSyncing = false;
 
 // ==========================================
 // FUNGSI PENCARI WAKTU DUAL-SERVER
 // ==========================================
 const fetchNetworkTime = async () => {
   try {
-    // Tambah konfigurasi { cache: "no-store" } agar iOS Safari tidak mengakali memori cache
     const res1 = await fetch(
       `https://worldtimeapi.org/api/timezone/Etc/UTC?nocache=${Date.now()}`,
       { cache: "no-store" },
@@ -34,7 +33,7 @@ const fetchNetworkTime = async () => {
 export const syncServerTime = async () => {
   if (!navigator.onLine || isSyncing) return;
 
-  isSyncing = true; // Kunci proses
+  isSyncing = true;
   try {
     const serverTime = await fetchNetworkTime();
     const localTime = Date.now();
@@ -47,7 +46,7 @@ export const syncServerTime = async () => {
       localStorage.setItem("is_time_manipulated", "true");
       serverValidated = false;
     } else {
-      // HAPUS KUNCI SECARA PAKSA!
+      // JAM TERBUKTI BENAR! HAPUS KUNCI SECARA PAKSA
       localStorage.removeItem("is_time_manipulated");
       serverValidated = true;
       localStorage.setItem("last_valid_time", localTime.toString());
@@ -55,7 +54,7 @@ export const syncServerTime = async () => {
   } catch (error) {
     console.warn("Gagal menyinkronkan waktu. Menunggu percobaan berikutnya.");
   } finally {
-    isSyncing = false; // Buka kunci proses
+    isSyncing = false;
   }
 };
 
@@ -63,7 +62,7 @@ export const getSecureTime = () => {
   const currentLocalTime = Date.now();
   const lastSavedTime = localStorage.getItem("last_valid_time");
 
-  // LAPIS 2: ANTI-REWIND (Mencegah mesin waktu ke masa lalu saat offline)
+  // LAPIS 2: ANTI-REWIND (Mencegah mundur ke masa lalu saat offline)
   if (
     !serverValidated &&
     lastSavedTime &&
@@ -72,13 +71,15 @@ export const getSecureTime = () => {
     localStorage.setItem("is_time_manipulated", "true");
   }
 
-  // Rekam jejak waktu tertinggi
-  if (
-    !lastSavedTime ||
-    currentLocalTime > parseInt(lastSavedTime) ||
-    serverValidated
-  ) {
-    localStorage.setItem("last_valid_time", currentLocalTime.toString());
+  // Hanya rekam jejak waktu tertinggi JIKA TIDAK SEDANG DIMANIPULASI
+  if (localStorage.getItem("is_time_manipulated") !== "true") {
+    if (
+      !lastSavedTime ||
+      currentLocalTime > parseInt(lastSavedTime) ||
+      serverValidated
+    ) {
+      localStorage.setItem("last_valid_time", currentLocalTime.toString());
+    }
   }
 
   return new Date(currentLocalTime + timeOffset);
@@ -89,14 +90,40 @@ export const checkTimeTampering = () => {
 };
 
 // ==========================================
-// LAPIS 3: REAL-TIME BACKGROUND SENSOR (KHUSUS iPHONE & TANPA REFRESH)
+// LAPIS 3: REAL-TIME BACKGROUND SENSOR (STRICT MODE)
 // ==========================================
 if (typeof window !== "undefined") {
-  // A. Deteksi saat aplikasi kembali difokuskan/dibuka dari Background (Setelah ubah Pengaturan HP)
+  let lastTick = Date.now();
+  let lastPerf = performance.now();
+
+  const checkDrift = () => {
+    const currentTick = Date.now();
+    const currentPerf = performance.now();
+
+    const tickDelta = currentTick - lastTick;
+    const perfDelta = currentPerf - lastPerf;
+
+    // Jika beda waktu antara jam sistem kalender dan mesin HP melebihi 3 detik.
+    if (Math.abs(tickDelta - perfDelta) > 3000) {
+      // INI KUNCI UTAMANYA: LANGSUNG KUNCI APLIKASI (MERAH) TANPA TUNGGU SERVER!
+      localStorage.setItem("is_time_manipulated", "true");
+      serverValidated = false;
+
+      // Paksa sinkronisasi HANYA JIKA online. Jika offline, layar tetap terkunci.
+      if (navigator.onLine) {
+        syncServerTime();
+      }
+    }
+
+    lastTick = currentTick;
+    lastPerf = currentPerf;
+  };
+
+  // A. Deteksi saat aplikasi dibuka dari Background (Setelah ubah Pengaturan HP)
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-      // PAKSA SINKRONISASI SEKETIKA!
-      syncServerTime();
+      checkDrift(); // Cek loncatan seketika
+      if (navigator.onLine) syncServerTime();
     }
   });
 
@@ -105,29 +132,6 @@ if (typeof window !== "undefined") {
     syncServerTime();
   });
 
-  // C. Sensor Loncatan Waktu (Drift Detector)
-  let lastTick = Date.now();
-  let lastPerf = performance.now();
-
-  setInterval(() => {
-    const currentTick = Date.now();
-    const currentPerf = performance.now();
-
-    const tickDelta = currentTick - lastTick;
-    const perfDelta = currentPerf - lastPerf;
-
-    // Jika beda waktu antara jam sistem kalender dan mesin HP melebihi 3 detik.
-    // (Terjadi saat user mengubah jam paksa, ATAU saat HP baru bangun dari layar mati/Sleep)
-    if (Math.abs(tickDelta - perfDelta) > 3000) {
-      serverValidated = false;
-      // Jangan langsung memvonis bersalah (karena bisa jadi dia cuma Sleep).
-      // Paksa saja panggil hakim server untuk mengecek kebenaran jam barunya!
-      if (navigator.onLine) {
-        syncServerTime();
-      }
-    }
-
-    lastTick = currentTick;
-    lastPerf = currentPerf;
-  }, 1000);
+  // C. Pemantauan berdetak setiap 1 detik
+  setInterval(checkDrift, 1000);
 }
