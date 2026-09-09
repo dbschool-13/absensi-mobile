@@ -71,7 +71,7 @@ export const attendanceService = {
     latitude,
     longitude,
     distance,
-    photoUrl,
+    photoUrl, // Dibiarkan sebagai placeholder agar urutan parameter Dashboard tidak rusak
     clientTimestamp = new Date().toISOString(),
     isOfflineSync = false,
   ) => {
@@ -81,7 +81,6 @@ export const attendanceService = {
         finalTimeStr = await getAbsoluteTrueTime(clientTimestamp);
       }
 
-      // PERBAIKAN: Ubah Teks String kembali menjadi JS Date Object
       const absoluteDateObj = new Date(finalTimeStr);
       const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
 
@@ -95,13 +94,12 @@ export const attendanceService = {
         school_id: schoolId,
         date: trueDateStr,
         check_in: {
-          // PERBAIKAN: Simpan sebagai Date Object agar menjadi Timestamp Firebase
-          time: absoluteDateObj,
+          time: new Date(finalTimeStr),
           latitude,
           longitude,
           distance_meters: distance,
-          photo_url: photoUrl,
           device_info: deviceInfo,
+          // photo_url SUDAH DIHAPUS SEPENUHNYA DARI SINI
         },
         check_out: null,
         total_hours: 0,
@@ -127,7 +125,7 @@ export const attendanceService = {
     longitude,
     distance,
     checkInTime,
-    photoUrl,
+    photoUrl, // Placeholder
     clientTimestamp = new Date().toISOString(),
     isOfflineSync = false,
   ) => {
@@ -137,7 +135,6 @@ export const attendanceService = {
         finalTimeStr = await getAbsoluteTrueTime(clientTimestamp);
       }
 
-      // PERBAIKAN: Ubah Teks String kembali menjadi JS Date Object
       const absoluteDateObj = new Date(finalTimeStr);
       const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
 
@@ -153,12 +150,11 @@ export const attendanceService = {
 
       const payloadUpdate = {
         check_out: {
-          // PERBAIKAN: Simpan sebagai Date Object
-          time: absoluteDateObj,
+          time: new Date(finalTimeStr),
           latitude,
           longitude,
           distance_meters: distance,
-          photo_url: photoUrl,
+          // photo_url SUDAH DIHAPUS SEPENUHNYA DARI SINI
         },
         total_hours: totalHours,
         status: finalStatus,
