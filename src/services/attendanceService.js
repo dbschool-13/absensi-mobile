@@ -64,7 +64,7 @@ export const attendanceService = {
     }
   },
 
-  // 2. Proses Absen Datang (Ditambah param clientTimestamp & isOfflineSync)
+  // 2. Proses Absen Datang
   checkIn: async (
     userId,
     schoolId,
@@ -76,14 +76,13 @@ export const attendanceService = {
     isOfflineSync = false,
   ) => {
     try {
-      // VALIDASI FINAL TINGKAT DEWA
       let finalTimeStr = clientTimestamp;
       if (!isOfflineSync && navigator.onLine) {
         finalTimeStr = await getAbsoluteTrueTime(clientTimestamp);
       }
 
+      // PERBAIKAN: Ubah Teks String kembali menjadi JS Date Object
       const absoluteDateObj = new Date(finalTimeStr);
-      // Kita menggunakan tanggal dari server satelit agar user tidak bisa memanipulasi hari (misal mengubah HP ke hari kemarin)
       const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
 
       const docId = `${userId}_${trueDateStr}`;
@@ -96,7 +95,8 @@ export const attendanceService = {
         school_id: schoolId,
         date: trueDateStr,
         check_in: {
-          time: finalTimeStr, // Waktu murni anti-hack
+          // PERBAIKAN: Simpan sebagai Date Object agar menjadi Timestamp Firebase
+          time: absoluteDateObj,
           latitude,
           longitude,
           distance_meters: distance,
@@ -107,7 +107,7 @@ export const attendanceService = {
         total_hours: 0,
         status: "Belum Pulang",
         is_offline_sync: isOfflineSync,
-        server_created_at: serverTimestamp(), // Stempel forensik Firebase
+        server_created_at: serverTimestamp(),
       };
 
       await setDoc(docRef, payload, { merge: true });
@@ -132,12 +132,12 @@ export const attendanceService = {
     isOfflineSync = false,
   ) => {
     try {
-      // VALIDASI FINAL TINGKAT DEWA
       let finalTimeStr = clientTimestamp;
       if (!isOfflineSync && navigator.onLine) {
         finalTimeStr = await getAbsoluteTrueTime(clientTimestamp);
       }
 
+      // PERBAIKAN: Ubah Teks String kembali menjadi JS Date Object
       const absoluteDateObj = new Date(finalTimeStr);
       const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
 
@@ -153,7 +153,8 @@ export const attendanceService = {
 
       const payloadUpdate = {
         check_out: {
-          time: finalTimeStr, // Waktu murni anti-hack
+          // PERBAIKAN: Simpan sebagai Date Object
+          time: absoluteDateObj,
           latitude,
           longitude,
           distance_meters: distance,
