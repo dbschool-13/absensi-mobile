@@ -20,6 +20,7 @@ import { format } from "date-fns";
 // =================================================================
 const getAbsoluteTrueTime = async (fallbackTime) => {
   try {
+    // SERVER 1 (TIMEAPI)
     const res = await fetch(
       `https://timeapi.io/api/Time/current/zone?timeZone=UTC&nocache=${Date.now()}`,
       { cache: "no-store" },
@@ -31,6 +32,7 @@ const getAbsoluteTrueTime = async (fallbackTime) => {
     throw new Error("S1 Gagal");
   } catch (err) {
     try {
+      // SERVER 2 CADANGAN (WORLDTIMEAPI)
       const res2 = await fetch(
         `https://worldtimeapi.org/api/timezone/Etc/UTC?nocache=${Date.now()}`,
         { cache: "no-store" },

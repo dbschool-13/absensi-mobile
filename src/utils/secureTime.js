@@ -8,23 +8,25 @@ let isSyncing = false;
 // ==========================================
 const fetchNetworkTime = async () => {
   try {
+    // SERVER 1 UTAMA KINI TIMEAPI (Lebih Kuat & Stabil)
     const res1 = await fetch(
-      `https://worldtimeapi.org/api/timezone/Etc/UTC?nocache=${Date.now()}`,
+      `https://timeapi.io/api/Time/current/zone?timeZone=UTC&nocache=${Date.now()}`,
       { cache: "no-store" },
     );
     if (res1.ok) {
       const data1 = await res1.json();
-      return new Date(data1.datetime).getTime();
+      return new Date(data1.dateTime + "Z").getTime();
     }
     throw new Error("Server 1 gagal");
   } catch (error) {
+    // SERVER 2 CADANGAN WORLDTIMEAPI
     const res2 = await fetch(
-      `https://timeapi.io/api/Time/current/zone?timeZone=UTC&nocache=${Date.now()}`,
+      `https://worldtimeapi.org/api/timezone/Etc/UTC?nocache=${Date.now()}`,
       { cache: "no-store" },
     );
     if (res2.ok) {
       const data2 = await res2.json();
-      return new Date(data2.dateTime + "Z").getTime();
+      return new Date(data2.datetime).getTime();
     }
     throw new Error("Semua server waktu gagal");
   }
