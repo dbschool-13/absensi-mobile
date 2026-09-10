@@ -165,7 +165,7 @@ export default function AdminMonitoring() {
           </div>
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-              Total Terdata
+              Sudah Hadir
             </p>
             <h3 className="text-3xl font-black text-gray-800">{totalHadir}</h3>
           </div>
@@ -179,7 +179,7 @@ export default function AdminMonitoring() {
           </div>
           <div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-              Belum Terdata
+              Belum Datang
             </p>
             <h3 className="text-3xl font-black text-gray-800">{totalBelum}</h3>
           </div>
