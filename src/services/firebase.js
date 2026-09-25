@@ -1,8 +1,12 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager 
+} from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
-// TODO: Ganti dengan konfigurasi Firebase dari console Anda
+// Konfigurasi Firebase dari console Anda
 const firebaseConfig = {
   apiKey: "AIzaSyAzg1pn-htjMqcFf6iFCgGsP4gtMF-zNMg",
   authDomain: "db-absensipro.firebaseapp.com",
@@ -13,11 +17,18 @@ const firebaseConfig = {
   measurementId: "G-6DXE02DQHS",
 };
 
-// Initialize Firebase
+// 1. Inisialisasi Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Initialize Cloud Firestore
-export const db = getFirestore(app);
+// 2. Inisialisasi Cloud Firestore DENGAN FITUR CACHE LOKAL (OPTIMALISASI KUOTA)
+// Ini akan membuat browser menyimpan data yang pernah ditarik. 
+// Jika guru merefresh halaman, aplikasi akan membaca dari memori HP, bukan menagih kuota ke server Google.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ 
+    tabManager: persistentMultipleTabManager() 
+  })
+});
 
-// Initialize Storage Firebase
+// 3. Initialize Storage Firebase 
+// (Tetap kita biarkan jika nanti dibutuhkan untuk fungsi lain, meskipun untuk lampiran Izin kita akan beralih ke Cloudinary)
 export const storage = getStorage(app);

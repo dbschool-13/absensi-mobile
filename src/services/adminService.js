@@ -1,43 +1,70 @@
 import { db } from "./firebase";
-import { collection, query, where, getDocs } from "firebase/firestore";
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+} from "firebase/firestore";
 import { getTodayString } from "../utils/timeUtils";
 
 export const adminService = {
-  // Ambil Statistik Hari Ini
+  // 1. Ambil Statistik Hari Ini
   getDashboardStats: async (schoolId) => {
+    if (!schoolId)
+      return { totalPegawai: 0, hadir: 0, belumHadir: 0, persentase: 0 };
+
     try {
-      // 1. Ambil SEMUA user berdasarkan school_id saja (Aman dari error Index Firebase)
-      const qUsers = query(
-        collection(db, "users"),
-        where("school_id", "==", schoolId),
-      );
+      // BACA DARI SUB-KOLEKSI
+      const qUsers = collection(db, `schools/${schoolId}/users`);
       const userSnap = await getDocs(qUsers);
 
-      // 2. Filter secara manual (Kebal terhadap huruf besar/kecil)
       let totalPegawai = 0;
       const validRoles = ["guru", "tendik", "kepsek"];
 
       userSnap.forEach((doc) => {
         const data = doc.data();
-        // Ubah role menjadi huruf kecil semua agar "Guru", "GURU", "guru" dianggap sama
         const role = (data.role || "").toLowerCase();
-
         if (validRoles.includes(role)) {
           totalPegawai++;
         }
       });
 
-      // 3. Hitung Absen Hari Ini di sekolah ini
+      // Hitung Absen Hari Ini di sub-koleksi
       const today = getTodayString();
       const qAtt = query(
-        collection(db, "attendances"),
-        where("school_id", "==", schoolId),
+        collection(db, `schools/${schoolId}/attendances`),
         where("date", "==", today),
       );
       const attSnap = await getDocs(qAtt);
-      const hadir = attSnap.size;
 
-      // 4. Kalkulasi (Gunakan Math.max agar tidak minus)
+      let hadir = 0;
+
+      // ==========================================
+      // PERBAIKAN LOGIKA HITUNG HADIR (AUTO-INJECT)
+      // ==========================================
+      attSnap.forEach((doc) => {
+        const att = doc.data();
+        const isInject =
+          att.is_auto_injected === true ||
+          att.check_in?.time === "[AUTO-INJECT]";
+        const statusVal = (att.status || "").toLowerCase();
+
+        // Jangan hitung sebagai hadir jika statusnya Sakit atau Izin Pribadi
+        if (
+          isInject &&
+          (statusVal === "sakit" ||
+            statusVal === "izin_pribadi" ||
+            statusVal.includes("izin"))
+        ) {
+          return; // Skip (tidak dihitung hadir)
+        }
+        hadir++; // Dihitung hadir (Hadir fisik ATAU Cuti/Kedinasan jika aturan sekolah menganggapnya hadir)
+      });
+
       const belumHadir = Math.max(totalPegawai - hadir, 0);
       const persentase =
         totalPegawai > 0 ? Math.round((hadir / totalPegawai) * 100) : 0;
@@ -51,25 +78,14 @@ export const adminService = {
 
   // 2. Ambil Daftar Guru & Kepsek di Sekolah ini
   getTeachers: async (schoolId) => {
+    if (!schoolId) return [];
     try {
-      const { collection, query, where, getDocs } = await import(
-        "firebase/firestore"
-      );
-      // Ambil semua user di sekolah ini
-      const q = query(
-        collection(db, "users"),
-        where("school_id", "==", schoolId),
-      );
+      const q = collection(db, `schools/${schoolId}/users`);
       const snap = await getDocs(q);
       const teachers = [];
       snap.forEach((doc) => {
         const data = doc.data();
-        // Filter hanya guru dan kepsek (kecualikan admin web)
-        if (
-          data.role === "guru" ||
-          data.role === "kepsek" ||
-          data.role === "tendik"
-        ) {
+        if (["guru", "kepsek", "tendik"].includes(data.role)) {
           teachers.push({ id: doc.id, ...data });
         }
       });
@@ -82,17 +98,9 @@ export const adminService = {
 
   // 3. Ambil Data Rekap Bulanan
   getRekapData: async (schoolId, month, year) => {
+    if (!schoolId) return [];
     try {
-      const { collection, query, where, getDocs } = await import(
-        "firebase/firestore"
-      );
-
-      // Ambil semua absensi sekolah ini
-      const q = query(
-        collection(db, "attendances"),
-        where("school_id", "==", schoolId),
-      );
-
+      const q = collection(db, `schools/${schoolId}/attendances`);
       const snap = await getDocs(q);
       const attendances = [];
       const searchPrefix = `${year}-${month}`;
@@ -112,8 +120,8 @@ export const adminService = {
 
   // 4. Update Setting Sekolah
   updateSchoolSettings: async (schoolId, payload) => {
+    if (!schoolId) return false;
     try {
-      const { doc, updateDoc } = await import("firebase/firestore");
       const schoolRef = doc(db, "schools", schoolId);
       await updateDoc(schoolRef, payload);
       return true;
@@ -126,11 +134,6 @@ export const adminService = {
   // 5. Tambah Pegawai Baru (Guru/Kepsek/Tendik)
   addTeacher: async (teacherData) => {
     try {
-      const { collection, addDoc, query, where, getDocs } = await import(
-        "firebase/firestore"
-      );
-
-      // Cek apakah NIP sudah terdaftar
       const q = query(
         collection(db, "users"),
         where("nip", "==", teacherData.nip),
@@ -141,12 +144,23 @@ export const adminService = {
         return { success: false, message: "NIP sudah terdaftar!" };
       }
 
-      // PERBAIKAN DI SINI: Gunakan role dari teacherData, jika tidak ada baru gunakan 'guru'
-      await addDoc(collection(db, "users"), {
+      const newDocRef = doc(collection(db, "users"));
+      const payload = {
         ...teacherData,
-        role: teacherData.role || "guru", // <--- Baris ini yang sebelumnya hardcode 'guru'
+        role: teacherData.role || "guru",
         is_active: true,
-      });
+      };
+
+      await setDoc(newDocRef, payload);
+
+      if (teacherData.school_id) {
+        const subCollectionRef = doc(
+          db,
+          `schools/${teacherData.school_id}/users`,
+          newDocRef.id,
+        );
+        await setDoc(subCollectionRef, payload);
+      }
 
       return { success: true, message: "Pegawai berhasil ditambahkan!" };
     } catch (error) {
@@ -156,10 +170,11 @@ export const adminService = {
   },
 
   // 6. Hapus Data Guru
-  deleteTeacher: async (docId) => {
+  deleteTeacher: async (docId, schoolId) => {
+    if (!docId || !schoolId) return false;
     try {
-      const { doc, deleteDoc } = await import("firebase/firestore");
       await deleteDoc(doc(db, "users", docId));
+      await deleteDoc(doc(db, `schools/${schoolId}/users`, docId));
       return true;
     } catch (error) {
       console.error("Gagal menghapus guru:", error);
@@ -167,11 +182,14 @@ export const adminService = {
     }
   },
 
-  // 7. Reset ID Perangkat (Device Binding)
-  resetDevice: async (docId) => {
+  // 7. Reset ID Perangkat
+  resetDevice: async (docId, schoolId) => {
+    if (!docId || !schoolId) return false;
     try {
-      const { doc, updateDoc } = await import("firebase/firestore");
       await updateDoc(doc(db, "users", docId), { device_id: null });
+      await updateDoc(doc(db, `schools/${schoolId}/users`, docId), {
+        device_id: null,
+      });
       return true;
     } catch (error) {
       console.error("Gagal reset device:", error);

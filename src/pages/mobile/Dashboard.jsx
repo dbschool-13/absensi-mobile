@@ -88,7 +88,10 @@ export default function Dashboard() {
     const fetchTodayAtt = async () => {
       if (navigator.onLine) await syncServerTime();
       if (user) {
-        const attData = await attendanceService.getTodayAttendance(user.nip);
+        const attData = await attendanceService.getTodayAttendance(
+          user.nip,
+          user.school_id,
+        );
         setTodayAtt(attData);
       }
     };
@@ -196,11 +199,12 @@ export default function Dashboard() {
             data.distance,
             null,
             data.timestamp,
-            true
+            true,
           );
         } else {
           await attendanceService.checkOut(
             data.nip,
+            data.school_id,
             data.lat,
             data.lng,
             data.distance,
@@ -277,6 +281,7 @@ export default function Dashboard() {
         } else if (modalType === "pulang") {
           const result = await attendanceService.checkOut(
             user.nip,
+            user.school_id,
             latitude,
             longitude,
             distance,
@@ -309,16 +314,19 @@ export default function Dashboard() {
   // ==========================================
   // LOGIKA OVERRIDE DETEKSI IZIN/CUTI
   // ==========================================
-  const isAutoInject = todayAtt?.notes?.includes("[AUTO-INJECT");
-  const isLeaveZero = todayAtt?.total_hours === 0 && isAutoInject;
-  const isLeaveFull = todayAtt?.total_hours === 8 && isAutoInject;
+  const isAutoInject =
+    todayAtt?.is_auto_injected === true ||
+    todayAtt?.check_in?.time === "[AUTO-INJECT]";
+  const isLeaveZero = isAutoInject && todayAtt?.total_hours === 0;
+  const isLeaveFull = isAutoInject && todayAtt?.total_hours >= 8;
 
-  // Ambil label asli jika ada, namun hindari teks "completed"
-  let leaveLabel = todayAtt?.status || "IZIN";
-  if (isLeaveFull && isAutoInject) {
-    // Tarik tulisan CUTI / IZIN KEDINASAN dari catatan (notes)
-    const match = todayAtt.notes.match(/\[AUTO-INJECT:\s(.*?)\]/);
-    if (match) leaveLabel = match[1];
+  let leaveLabel = "IZIN";
+  if (isAutoInject && todayAtt?.status) {
+    // Mengubah "izin_kedinasan" menjadi "Izin Kedinasan"
+    leaveLabel = todayAtt.status
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
   }
 
   const hasCheckedIn = !!todayAtt?.check_in;
@@ -641,9 +649,10 @@ export default function Dashboard() {
               </span>
             </div>
             <p className="text-3xl font-black text-gray-800 relative z-10">
-              {/* Jika 0 jam, tampilkan status. Jika tidak, tetap tampilkan format waktu */}
-              {isLeaveZero ? (
-                <span className="text-xl text-orange-500">{leaveLabel}</span>
+              {isAutoInject ? (
+                <span className="text-xl text-emerald-600 font-bold">
+                  {leaveLabel}
+                </span>
               ) : hasCheckedIn ? (
                 format(
                   todayAtt.check_in.time?.toDate
@@ -668,9 +677,10 @@ export default function Dashboard() {
               </span>
             </div>
             <p className="text-3xl font-black text-gray-800 relative z-10">
-              {/* Sama seperti di atas */}
-              {isLeaveZero ? (
-                <span className="text-xl text-orange-500">{leaveLabel}</span>
+              {isAutoInject ? (
+                <span className="text-xl text-emerald-600 font-bold">
+                  {leaveLabel}
+                </span>
               ) : hasCheckedOut ? (
                 format(
                   todayAtt.check_out.time?.toDate

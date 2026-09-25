@@ -3,7 +3,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { leaveService } from "../../services/leaveService";
 import { adminService } from "../../services/adminService";
 import { db } from "../../services/firebase";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { collection, query, onSnapshot } from "firebase/firestore";
 import toast from "react-hot-toast";
 import {
   CheckCircle,
@@ -28,7 +28,7 @@ export default function AdminApproval() {
   const [loading, setLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [selectedImage, setSelectedImage] = useState(null);
+  const [selectedAttachment, setSelectedAttachment] = useState(null);
 
   useEffect(() => {
     if (!user?.school_id) return;
@@ -39,10 +39,10 @@ export default function AdminApproval() {
       setTeachers(teachersData);
     });
 
-    const q = query(
-      collection(db, "leave_requests"),
-      where("school_id", "==", user.school_id),
-    );
+    // ========================================================
+    // ✅ PERBAIKAN KRUSIAL: Pindah ke Sub-Koleksi Sekolah
+    // ========================================================
+    const q = query(collection(db, `schools/${user.school_id}/leave_requests`));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const pending = [];
@@ -96,7 +96,11 @@ export default function AdminApproval() {
     setIsProcessing(true);
     const toastId = toast.loading("Menolak pengajuan...");
 
-    const success = await leaveService.rejectLeaveRequest(requestId);
+    // ✅ PERBAIKAN: Tambahkan user.school_id agar service tahu kamar mana yang ditolak
+    const success = await leaveService.rejectLeaveRequest(
+      requestId,
+      user.school_id,
+    );
 
     if (success) {
       toast.success("Pengajuan ditolak.", { id: toastId });
@@ -113,6 +117,14 @@ export default function AdminApproval() {
 
   const currentData =
     activeTab === "pending" ? pendingRequests : resolvedRequests;
+
+  const isPdfFile = (url) => {
+    if (!url) return false;
+    return (
+      url.startsWith("data:application/pdf") ||
+      url.toLowerCase().includes(".pdf")
+    );
+  };
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-6 pb-24 font-sans">
@@ -138,6 +150,7 @@ export default function AdminApproval() {
             }`}
           >
             <Clock size={16} /> Menunggu
+            {/* NOTIFIKASI ANGKA PADA TAB */}
             {pendingRequests.length > 0 && (
               <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full animate-pulse">
                 {pendingRequests.length}
@@ -269,10 +282,14 @@ export default function AdminApproval() {
                     <td className="p-5 text-center">
                       {req.attachment ? (
                         <button
-                          onClick={() => setSelectedImage(req.attachment)}
+                          onClick={() => setSelectedAttachment(req.attachment)}
                           className="p-2 bg-indigo-50 text-indigo-500 rounded-xl hover:bg-indigo-100 transition-colors mx-auto flex flex-col items-center gap-1 border border-indigo-100"
                         >
-                          <ImageIcon size={20} />
+                          {isPdfFile(req.attachment) ? (
+                            <FileText size={20} />
+                          ) : (
+                            <ImageIcon size={20} />
+                          )}
                           <span className="text-[9px] font-bold uppercase tracking-wider">
                             Lihat
                           </span>
@@ -324,13 +341,10 @@ export default function AdminApproval() {
         </div>
       </div>
 
-      {/* ========================================== */}
-      {/* MODAL LIHAT SURAT (Diperbesar Ekstra)      */}
-      {/* ========================================== */}
-      {selectedImage && (
+      {/* MODAL LIHAT SURAT (DUKUNG GAMBAR & PDF) */}
+      {selectedAttachment && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/85 backdrop-blur-sm p-4 md:p-8">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-5xl flex flex-col overflow-hidden animate-[slideUp_0.3s_ease-out] max-h-[95vh]">
-            {/* Header Modal */}
             <div className="px-6 py-4 flex justify-between items-center border-b border-gray-100 flex-shrink-0 bg-white">
               <div className="flex items-center gap-2 text-gray-800">
                 <ZoomIn size={22} className="text-primary" />
@@ -339,7 +353,7 @@ export default function AdminApproval() {
                 </h3>
               </div>
               <button
-                onClick={() => setSelectedImage(null)}
+                onClick={() => setSelectedAttachment(null)}
                 className="p-2 bg-gray-50 text-gray-500 hover:bg-red-50 hover:text-red-500 rounded-full transition-colors"
                 title="Tutup (Esc)"
               >
@@ -347,13 +361,20 @@ export default function AdminApproval() {
               </button>
             </div>
 
-            {/* Container Gambar (Bisa Scroll jika terlalu panjang) */}
             <div className="p-4 md:p-8 bg-gray-100 flex-1 flex justify-center items-center overflow-auto">
-              <img
-                src={selectedImage}
-                alt="Bukti Lampiran"
-                className="max-h-[80vh] w-auto object-contain rounded-xl shadow-lg border border-gray-200/50 bg-white"
-              />
+              {isPdfFile(selectedAttachment) ? (
+                <iframe
+                  src={selectedAttachment}
+                  title="PDF Viewer"
+                  className="w-full h-[75vh] rounded-xl shadow-lg border border-gray-200/50 bg-white"
+                />
+              ) : (
+                <img
+                  src={selectedAttachment}
+                  alt="Bukti Lampiran"
+                  className="max-h-[80vh] w-auto object-contain rounded-xl shadow-lg border border-gray-200/50 bg-white"
+                />
+              )}
             </div>
           </div>
         </div>

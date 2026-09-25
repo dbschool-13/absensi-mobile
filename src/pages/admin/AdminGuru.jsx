@@ -69,7 +69,7 @@ export default function AdminGuru() {
 
   const handleDelete = async (docId, name) => {
     if (window.confirm(`Yakin ingin menghapus data ${name}?`)) {
-      if (await adminService.deleteTeacher(docId)) {
+      if (await adminService.deleteTeacher(docId, user.school_id)) {
         toast.success("Data berhasil dihapus.");
         fetchTeachers();
       } else toast.error("Gagal menghapus data.");
@@ -78,7 +78,7 @@ export default function AdminGuru() {
 
   const handleResetDevice = async (docId, name) => {
     if (window.confirm(`Lepaskan tautan HP untuk ${name}?`)) {
-      if (await adminService.resetDevice(docId)) {
+      if (await adminService.resetDevice(docId, user.school_id)) {
         toast.success(`Tautan HP berhasil di-reset.`);
         fetchTeachers();
       } else toast.error("Gagal me-reset tautan perangkat.");

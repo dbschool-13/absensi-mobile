@@ -3,13 +3,14 @@ import { saveAs } from "file-saver";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
 
-// Helper untuk membaca waktu dari Firebase Timestamp ATAU ISO String (Suntikan Izin)
+// Helper aman membaca waktu, menangani string "[AUTO-INJECT]" agar tidak crash
 const getValidTime = (timeData) => {
-  if (!timeData) return null;
+  if (!timeData || timeData === "[AUTO-INJECT]") return null;
   if (typeof timeData.toDate === "function") {
-    return timeData.toDate(); // Kembalikan objek Date asli
+    return timeData.toDate();
   }
-  return new Date(timeData); // Konversi string ISO ke objek Date
+  const parsed = new Date(timeData);
+  return isNaN(parsed.getTime()) ? null : parsed;
 };
 
 export const exportToExcel = async (
@@ -22,7 +23,6 @@ export const exportToExcel = async (
   const worksheet = workbook.addWorksheet("Rekap Mingguan");
 
   // 1. Setup Kolom Dasar
-  // Lebar kolom
   worksheet.getColumn(1).width = 5; // No
   worksheet.getColumn(2).width = 25; // Nama
 
@@ -134,24 +134,36 @@ export const exportToExcel = async (
 
       if (absenHariIni) {
         // =========================================================
-        // LOGIKA BARU: BACA STATUS DARI NOTES
+        // LOGIKA BARU: BACA AUTO-INJECT & STATUS
         // =========================================================
-        const note = (absenHariIni.notes || "").toUpperCase();
-        const isAutoInject = note.includes("[AUTO-INJECT");
+        const isAutoInject =
+          absenHariIni.is_auto_injected === true ||
+          absenHariIni.check_in?.time === "[AUTO-INJECT]";
 
         if (isAutoInject) {
           // JIKA IZIN/SAKIT/CUTI
-          let leaveLabel = absenHariIni.status.toUpperCase();
-          const match = note.match(/\[AUTO-INJECT:\s(.*?)\]/);
-          if (match) leaveLabel = match[1];
+          let leaveLabel = "Izin";
+          const statusVal = (absenHariIni.status || "").toLowerCase();
+
+          if (statusVal === "cuti") leaveLabel = "Cuti";
+          else if (statusVal === "sakit") leaveLabel = "Sakit";
+          else if (statusVal === "izin_kedinasan")
+            leaveLabel = "Izin Kedinasan";
+          else if (statusVal === "izin_pribadi" || statusVal.includes("izin"))
+            leaveLabel = "Izin Pribadi";
+          else
+            leaveLabel = absenHariIni.status
+              ? absenHariIni.status
+                  .split("_")
+                  .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                  .join(" ")
+              : "Izin";
 
           // Merge sel jam datang & pulang untuk menuliskan nama Izinnya di tengah
           worksheet.mergeCells(rowIndex, cIndex, rowIndex, cIndex + 1);
 
           cellDatang.value = leaveLabel;
           cellDatang.font = { color: { argb: "FFFFA500" }, bold: true }; // Warna Oranye
-
-          // cellPulang tidak perlu diisi karena sudah di-merge ke cellDatang
         } else {
           // JIKA HADIR NORMAL DI SEKOLAH
           const isTargetMet =

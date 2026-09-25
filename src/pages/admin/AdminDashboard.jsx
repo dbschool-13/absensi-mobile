@@ -3,6 +3,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { adminService } from "../../services/adminService";
 import { Users, CheckCircle, AlertCircle, TrendingUp } from "lucide-react";
 import { getFormattedDate } from "../../utils/timeUtils";
+// import MigrationTool from "../admin/MigrationTool";
 
 export default function AdminDashboard() {
   const { user, schoolData } = useAuth();
@@ -67,6 +68,8 @@ export default function AdminDashboard() {
           </p>
         </div>
       </div>
+
+      {/* <MigrationTool/> */}
 
       {/* Grid Statistik */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

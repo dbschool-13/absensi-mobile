@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { leaveService } from "../../services/leaveService";
+import { uploadToCloudinary } from "../../utils/uploadService";
 import toast from "react-hot-toast";
 import {
   Calendar,
@@ -20,57 +21,18 @@ import {
 import { format } from "date-fns";
 import { id as localeId } from "date-fns/locale";
 
-// Helper Kompresi Gambar: Mengecilkan ukuran foto agar muat di Database Firestore
-const convertToBase64 = (file) => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target.result;
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        const MAX_WIDTH = 800; // Maksimal resolusi
-        const MAX_HEIGHT = 800;
-        let width = img.width;
-        let height = img.height;
-
-        // Proporsi skala otomatis
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-
-        // Kompres menjadi JPEG dengan kualitas 60%
-        resolve(canvas.toDataURL("image/jpeg", 0.6));
-      };
-    };
-    reader.onerror = (error) => reject(error);
-  });
-};
-
 export default function PengajuanIzin() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState("form"); // "form" atau "riwayat"
+  const [activeTab, setActiveTab] = useState("form");
 
   // STATE FORMULIR
   const [type, setType] = useState("izin_pribadi");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [reason, setReason] = useState("");
-  const [attachment, setAttachment] = useState(null);
+
+  // State untuk menampung File Object asli dan Preview UI
+  const [attachmentFile, setAttachmentFile] = useState(null);
   const [attachmentPreview, setAttachmentPreview] = useState(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -89,7 +51,6 @@ export default function PengajuanIzin() {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    // Cek antrean offline saat pertama buka
     const queue = JSON.parse(localStorage.getItem("offline_leaves") || "[]");
     setPendingSync(queue.length);
 
@@ -99,7 +60,7 @@ export default function PengajuanIzin() {
     };
   }, []);
 
-  // Tarik riwayat saat pindah tab
+  // Tarik riwayat
   useEffect(() => {
     if (activeTab === "riwayat" && !isOffline) {
       fetchHistory();
@@ -108,35 +69,59 @@ export default function PengajuanIzin() {
 
   const fetchHistory = async () => {
     setLoadingHistory(true);
-    const data = await leaveService.getUserHistory(user.nip);
+    const data = await leaveService.getUserHistory(user.nip, user.school_id);
     setHistory(data);
     setLoadingHistory(false);
   };
 
-  const handleImageChange = async (e) => {
+  // ==========================================
+  // LOGIKA PEMILIHAN FILE (GAMBAR & PDF)
+  // ==========================================
+  const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      // Validasi Ukuran (Maks 2MB)
       if (file.size > 2 * 1024 * 1024) {
-        toast.error("Ukuran gambar maksimal 2MB!");
+        toast.error("Ukuran lampiran maksimal 2MB!");
         return;
       }
-      const base64 = await convertToBase64(file);
-      setAttachment(base64);
-      setAttachmentPreview(URL.createObjectURL(file));
+
+      // Validasi Ekstensi
+      const allowedTypes = [
+        "image/jpeg",
+        "image/png",
+        "image/jpg",
+        "application/pdf",
+      ];
+      if (!allowedTypes.includes(file.type)) {
+        toast.error("Format file harus JPG, PNG, atau PDF!");
+        return;
+      }
+
+      setAttachmentFile(file);
+
+      // Tampilkan Preview Berdasarkan Tipe
+      if (file.type.includes("image")) {
+        setAttachmentPreview(URL.createObjectURL(file));
+      } else {
+        setAttachmentPreview("PDF");
+      }
     }
   };
 
+  // ==========================================
+  // LOGIKA PENGIRIMAN DATA (CLOUDINARY + FIRESTORE)
+  // ==========================================
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // PERBAIKAN: Semua wajib diisi, termasuk dokumen pendukung!
     if (!startDate || !endDate || !reason) {
       return toast.error("Harap lengkapi tanggal dan alasan!");
     }
     if (new Date(startDate) > new Date(endDate)) {
       return toast.error("Tanggal akhir tidak boleh mendahului tanggal mulai!");
     }
-    if (!attachment) {
+    if (!attachmentFile) {
       return toast.error("Dokumen/Foto bukti WAJIB dilampirkan!");
     }
 
@@ -144,33 +129,53 @@ export default function PengajuanIzin() {
 
     try {
       if (isOffline) {
-        // SIMPAN KE OFFLINE QUEUE
-        const payload = {
-          id: Date.now().toString(),
-          nip: user.nip,
-          school_id: user.school_id,
-          type,
-          start_date: startDate,
-          end_date: endDate,
-          reason,
-          attachment,
+        // JIKA OFFLINE: Baca File sebagai Base64 murni untuk dititip ke localStorage
+        const reader = new FileReader();
+        reader.readAsDataURL(attachmentFile);
+        reader.onloadend = () => {
+          const base64String = reader.result;
+
+          const payload = {
+            id: Date.now().toString(),
+            nip: user.nip,
+            school_id: user.school_id,
+            type,
+            start_date: startDate,
+            end_date: endDate,
+            reason,
+            attachment: base64String, // Dititip sementara sebagai Base64
+          };
+
+          const queue = JSON.parse(
+            localStorage.getItem("offline_leaves") || "[]",
+          );
+          queue.push(payload);
+          localStorage.setItem("offline_leaves", JSON.stringify(queue));
+
+          setPendingSync(queue.length);
+          toast.success(
+            "📶 Offline: Pengajuan disimpan di HP. Akan dikirim otomatis saat sinyal stabil.",
+          );
+          resetForm();
+          setActiveTab("riwayat");
+          setIsSubmitting(false);
         };
-
-        const queue = JSON.parse(
-          localStorage.getItem("offline_leaves") || "[]",
-        );
-        queue.push(payload);
-        localStorage.setItem("offline_leaves", JSON.stringify(queue));
-
-        setPendingSync(queue.length);
-        toast.success(
-          "📶 Offline: Pengajuan disimpan di HP. Akan dikirim otomatis saat sinyal stabil.",
-        );
-
-        resetForm();
-        setActiveTab("riwayat");
       } else {
-        // KIRIM ONLINE KE SERVER
+        // JIKA ONLINE: Upload ke Cloudinary dulu
+        const toastId = toast.loading("Mengunggah dokumen ke server...");
+
+        const fileUrl = await uploadToCloudinary(attachmentFile);
+
+        if (!fileUrl) {
+          setIsSubmitting(false);
+          return toast.error("Gagal mengunggah dokumen. Coba lagi.", {
+            id: toastId,
+          });
+        }
+
+        toast.loading("Mengirim data pengajuan...", { id: toastId });
+
+        // Submit ke Firestore menggunakan URL Cloudinary
         const success = await leaveService.submitLeaveRequest(
           user.nip,
           user.school_id,
@@ -178,19 +183,20 @@ export default function PengajuanIzin() {
           startDate,
           endDate,
           reason,
-          attachment,
+          fileUrl, // Mengirim URL dari Cloudinary, bukan Base64
         );
 
         if (success) {
+          toast.success("Pengajuan Berhasil!", { id: toastId });
           setShowSuccessModal(true);
           fetchHistory();
         } else {
-          toast.error("Gagal mengirim pengajuan. Coba lagi.");
+          toast.error("Gagal mengirim pengajuan. Coba lagi.", { id: toastId });
         }
+        setIsSubmitting(false);
       }
     } catch (error) {
       toast.error("Terjadi kesalahan sistem.");
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -200,7 +206,7 @@ export default function PengajuanIzin() {
     setStartDate("");
     setEndDate("");
     setReason("");
-    setAttachment(null);
+    setAttachmentFile(null);
     setAttachmentPreview(null);
   };
 
@@ -210,7 +216,6 @@ export default function PengajuanIzin() {
     setActiveTab("riwayat");
   };
 
-  // Konfigurasi Info Jenis Pengajuan
   const leaveTypes = [
     {
       id: "izin_pribadi",
@@ -409,17 +414,27 @@ export default function PengajuanIzin() {
                 <div className="relative border-2 border-dashed border-gray-200 bg-gray-50 rounded-2xl p-4 text-center hover:bg-gray-100 transition-colors">
                   <input
                     type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
+                    accept="image/*, application/pdf" // Menerima PDF & Gambar
+                    onChange={handleFileChange}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                    required
+                    required={!attachmentFile} // Wajib jika file belum dipilih
                   />
-                  {attachmentPreview ? (
+
+                  {attachmentPreview === "PDF" ? (
+                    <div className="space-y-2 py-2">
+                      <div className="w-16 h-16 bg-red-100 text-red-500 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+                        <FileText size={32} />
+                      </div>
+                      <p className="text-xs font-bold text-primary">
+                        PDF Terlampir (Ketuk untuk ganti)
+                      </p>
+                    </div>
+                  ) : attachmentPreview ? (
                     <div className="space-y-2">
                       <img
                         src={attachmentPreview}
                         alt="Preview"
-                        className="h-32 mx-auto rounded-lg object-contain"
+                        className="h-32 mx-auto rounded-lg object-contain shadow-sm"
                       />
                       <p className="text-xs font-bold text-primary">
                         Ketuk untuk mengganti foto
@@ -435,7 +450,7 @@ export default function PengajuanIzin() {
                           Unggah Bukti
                         </p>
                         <p className="text-[10px] text-gray-400 mt-1">
-                          Surat Dokter / Surat Tugas / Bukti Acara (Maks 2MB)
+                          Surat Dokter / Dokumen Resmi (.JPG / .PDF) Maks 2MB
                         </p>
                       </div>
                     </div>
@@ -518,10 +533,10 @@ export default function PengajuanIzin() {
                     <span
                       className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 ${
                         item.status === "approved"
-                          ? "bg-emerald-50 text-emerald-600"
+                          ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
                           : item.status === "rejected"
-                          ? "bg-red-50 text-red-600"
-                          : "bg-orange-50 text-orange-600"
+                          ? "bg-red-50 text-red-600 border border-red-200"
+                          : "bg-orange-50 text-orange-600 border border-orange-200"
                       }`}
                     >
                       {item.status === "approved" ? (
@@ -574,7 +589,7 @@ export default function PengajuanIzin() {
 
             <p className="text-sm font-medium text-gray-500 leading-relaxed mb-8">
               Setelah Pengajuan ini dikirim, mohon segera infokan ke{" "}
-              <strong>Wakasek Kurikulum</strong> untuk diproses persetujuannya.
+              <strong>Admin/Wakasek</strong> untuk diproses persetujuannya.
             </p>
 
             <button

@@ -26,9 +26,8 @@ export const AuthProvider = ({ children }) => {
   const getHardwareDeviceId = async () => {
     try {
       const info = await Device.getId();
-      return info.identifier; // Ini akan mengembalikan UUID permanen dari Android/iOS
+      return info.identifier; 
     } catch (error) {
-      // Fallback jika dijalankan di Web Browser (Chrome/Safari)
       let webId = localStorage.getItem("app_device_id");
       if (!webId) {
         webId =
@@ -70,6 +69,7 @@ export const AuthProvider = ({ children }) => {
   const login = async (nip, password) => {
     try {
       setGlobalLoading(true);
+      // Baca selalu dari Root untuk keamanan login
       const usersRef = collection(db, "users");
       const q = query(
         usersRef,
@@ -83,7 +83,7 @@ export const AuthProvider = ({ children }) => {
         let userData = userDoc.data();
 
         // ==========================================
-        // CEK DEVICE BINDING (BERLAKU UNTUK SEMUA PEGAWAI KECUALI ADMIN WEB)
+        // CEK DEVICE BINDING (BERLAKU UNTUK GURU & TENDIK)
         // ==========================================
         if (userData.role !== "admin") {
           const schoolRef = doc(db, "schools", userData.school_id);
@@ -91,7 +91,7 @@ export const AuthProvider = ({ children }) => {
           const schoolConfig = schoolSnap.data();
 
           if (schoolConfig?.enable_device_binding) {
-            const localDeviceId = await getHardwareDeviceId(); // <- Tambahkan AWAIT
+            const localDeviceId = await getHardwareDeviceId(); 
 
             // Aturan 1: Jika AKUN ini sudah terikat dengan HP lain
             if (userData.device_id && userData.device_id !== localDeviceId) {
@@ -104,6 +104,7 @@ export const AuthProvider = ({ children }) => {
 
             // Aturan 2: Jika AKUN ini belum terikat, cek apakah HP ini milik orang lain
             if (!userData.device_id) {
+              // Cek di jalur Root apakah HP ini dipakai NIP lain
               const checkDeviceQuery = query(
                 collection(db, "users"),
                 where("device_id", "==", localDeviceId),
@@ -118,15 +119,29 @@ export const AuthProvider = ({ children }) => {
                 return false;
               }
 
-              // Jika aman, ikat ke perangkat ini
+              // ==========================================
+              // ✅ PERBAIKAN KRUSIAL: SINKRONISASI GANDA
+              // Ikat ke perangkat ini dan simpan di KEDUA TEMPAT!
+              // ==========================================
+              
+              // 1. Simpan ke Jalur Root (Untuk Autentikasi)
               await updateDoc(userDoc.ref, { device_id: localDeviceId });
+              
+              // 2. Simpan ke Kamar Sub-Koleksi Sekolah (Untuk Data Dasbor Admin)
+              const subCollectionRef = doc(db, `schools/${userData.school_id}/users`, userDoc.id);
+              try {
+                await updateDoc(subCollectionRef, { device_id: localDeviceId });
+              } catch (e) {
+                console.warn("Peringatan: Gagal sync device ke sub-koleksi. Pastikan Migrasi Tahap 3 sukses.", e);
+              }
+
               userData.device_id = localDeviceId;
             }
           }
         }
 
         const userObj = { id: userDoc.id, ...userData };
-        delete userObj.password;
+        delete userObj.password; // Jangan simpan password ke localStorage
 
         setUser(userObj);
         localStorage.setItem("guru_user", JSON.stringify(userObj));

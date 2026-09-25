@@ -1,40 +1,43 @@
 import { db } from "./firebase";
 import {
   collection,
-  addDoc,
-  updateDoc,
   doc,
+  setDoc,
+  updateDoc,
   getDocs,
-  getDoc, // Tambahan untuk membaca data Sekolah
   query,
   where,
-  setDoc,
+  serverTimestamp,
 } from "firebase/firestore";
-import { eachDayOfInterval, format } from "date-fns";
 
 export const leaveService = {
-  // 1. Submit Pengajuan
   submitLeaveRequest: async (
     nip,
-    school_id,
+    schoolId,
     type,
     startDate,
     endDate,
     reason,
-    imageBase64,
+    attachmentUrl,
   ) => {
     try {
-      await addDoc(collection(db, "leave_requests"), {
+      const docId = Date.now().toString();
+      // PERUBAHAN PATH SUB-KOLEKSI
+      const docRef = doc(db, `schools/${schoolId}/leave_requests`, docId);
+
+      const payload = {
         nip,
-        school_id,
+        school_id: schoolId,
         type,
         start_date: startDate,
         end_date: endDate,
         reason,
-        attachment: imageBase64,
+        attachment: attachmentUrl, // URL Cloudinary
         status: "pending",
         created_at: new Date().toISOString(),
-      });
+      };
+
+      await setDoc(docRef, payload);
       return true;
     } catch (error) {
       console.error("Error submit leave:", error);
@@ -42,148 +45,55 @@ export const leaveService = {
     }
   },
 
-  // 2. Tarik Riwayat (User)
-  getUserHistory: async (nip) => {
+  // DITAMBAH SCHOOL ID
+  getUserHistory: async (nip, schoolId) => {
+    if (!schoolId) return [];
     try {
+      // PERUBAHAN PATH SUB-KOLEKSI
       const q = query(
-        collection(db, "leave_requests"),
+        collection(db, `schools/${schoolId}/leave_requests`),
         where("nip", "==", nip),
       );
       const snap = await getDocs(q);
-      return snap.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }))
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    } catch (error) {
-      return [];
-    }
-  },
-
-  // 3. Tarik Antrean Pending (Admin)
-  getPendingRequests: async (school_id) => {
-    try {
-      const q = query(
-        collection(db, "leave_requests"),
-        where("school_id", "==", school_id),
-        where("status", "==", "pending"),
+      const history = [];
+      snap.forEach((doc) => {
+        history.push({ id: doc.id, ...doc.data() });
+      });
+      return history.sort(
+        (a, b) => new Date(b.created_at) - new Date(a.created_at),
       );
-      const snap = await getDocs(q);
-      return snap.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }))
-        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     } catch (error) {
+      console.error("Error get leave history:", error);
       return [];
     }
   },
 
-  // 6. Tarik Riwayat yang sudah diproses (Approved/Rejected)
-  getResolvedRequests: async (school_id) => {
-    try {
-      const q = query(
-        collection(db, "leave_requests"),
-        where("school_id", "==", school_id),
-        where("status", "in", ["approved", "rejected"]) // Tarik yang bukan pending
-      );
-      const snap = await getDocs(q);
-      // Urutkan dari yang terbaru diproses
-      return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)); 
-    } catch (error) {
-      return [];
-    }
-  },
-
-  // ==========================================
-  // PERBAIKAN 1: Setujui & Suntik Absen Otomatis (Skip Libur)
-  // ==========================================
   approveLeaveRequest: async (requestData) => {
     try {
-      // A. Ubah Status Pengajuan
-      const reqRef = doc(db, "leave_requests", requestData.id);
-      await updateDoc(reqRef, { status: "approved" });
+      const { id, school_id, nip, type, start_date } = requestData;
+      // 1. Update status Izin di Sub-Koleksi Sekolah
+      const leaveRef = doc(db, `schools/${school_id}/leave_requests`, id);
+      await updateDoc(leaveRef, { status: "approved" });
 
-      // B. Ambil Jadwal Libur dari Profil Sekolah di Database
-      const schoolRef = doc(db, "schools", requestData.school_id);
-      const schoolSnap = await getDoc(schoolRef);
-      let holidays = [];
-      let workingDays = [1, 2, 3, 4, 5]; // Default Senin-Jumat
+      // 2. Suntik otomatis ke Sub-Koleksi Absensi Sekolah
+      const attDocId = `${nip}_${start_date}`;
+      const attRef = doc(db, `schools/${school_id}/attendances`, attDocId);
 
-      if (schoolSnap.exists()) {
-        const sData = schoolSnap.data();
-        if (sData.holidays) holidays = sData.holidays;
-        if (sData.working_days) workingDays = sData.working_days;
-      }
-
-      // C. Generate rentang tanggal
-      const start = new Date(requestData.start_date);
-      const end = new Date(requestData.end_date);
-      const days = eachDayOfInterval({ start, end });
-
-      // D. Lakukan perulangan untuk setiap hari
-      for (const day of days) {
-        const dateStr = format(day, "yyyy-MM-dd");
-        const dayOfWeek = day.getDay();
-
-        // CEK HARI LIBUR: Jika hari ini bukan hari kerja atau masuk dalam daftar libur nasional -> SKIP!
-        const isHoliday = holidays.some((h) => h.date === dateStr);
-        if (!workingDays.includes(dayOfWeek) || isHoliday) {
-          continue;
-        }
-
-        const attId = `${requestData.nip}_${dateStr}`;
-        const attRef = doc(db, "attendances", attId);
-
-        let totalHoursInjected = 0;
-        let noteLabel = requestData.type.toUpperCase();
-        let finalStatus = "completed";
-
-        if (
-          requestData.type === "izin_kedinasan" ||
-          requestData.type === "cuti"
-        ) {
-          totalHoursInjected = 8;
-          if (requestData.type === "izin_kedinasan")
-            noteLabel = "IZIN KEDINASAN";
-        } else if (
-          requestData.type === "izin_pribadi" ||
-          requestData.type === "sakit"
-        ) {
-          totalHoursInjected = 0;
-          if (requestData.type === "izin_pribadi") noteLabel = "IZIN PRIBADI";
-          finalStatus = noteLabel;
-        }
-
-        const attData = {
-          user_id: requestData.nip,
-          school_id: requestData.school_id,
-          date: dateStr,
-          total_hours: totalHoursInjected,
-          status: finalStatus,
-          notes: `[AUTO-INJECT: ${noteLabel}] - ${requestData.reason}`,
-        };
-
-        // Jika 8 Jam, berikan jam masuk & pulang. Jika 0 Jam, kosongkan.
-        if (totalHoursInjected === 8) {
-          attData.check_in = {
-            time: `${dateStr}T07:00:00`,
-            status: "on_time",
-            lat: 0,
-            lng: 0,
-            distance: 0,
-          };
-          attData.check_out = {
-            time: `${dateStr}T15:00:00`,
-            status: "on_time",
-            lat: 0,
-            lng: 0,
-            distance: 0,
-          };
-        } else {
-          attData.check_in = null;
-          attData.check_out = null;
-        }
-
-        await setDoc(attRef, attData, { merge: true });
-      }
+      await setDoc(
+        attRef,
+        {
+          user_id: nip,
+          school_id: school_id,
+          date: start_date,
+          status: type,
+          total_hours: type === "izin_kedinasan" || type === "cuti" ? 8 : 0,
+          check_in: { time: "[AUTO-INJECT]", latitude: 0, longitude: 0 },
+          check_out: { time: "[AUTO-INJECT]", latitude: 0, longitude: 0 },
+          is_auto_injected: true,
+          server_created_at: serverTimestamp(),
+        },
+        { merge: true },
+      );
 
       return true;
     } catch (error) {
@@ -192,13 +102,14 @@ export const leaveService = {
     }
   },
 
-  // 5. Tolak Pengajuan
-  rejectLeaveRequest: async (requestId) => {
+  // DITAMBAH SCHOOL ID
+  rejectLeaveRequest: async (requestId, schoolId) => {
     try {
-      const reqRef = doc(db, "leave_requests", requestId);
-      await updateDoc(reqRef, { status: "rejected" });
+      const leaveRef = doc(db, `schools/${schoolId}/leave_requests`, requestId);
+      await updateDoc(leaveRef, { status: "rejected" });
       return true;
     } catch (error) {
+      console.error("Error reject leave:", error);
       return false;
     }
   },

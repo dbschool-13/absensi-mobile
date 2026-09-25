@@ -11,6 +11,27 @@ import {
 import { format, parseISO } from "date-fns";
 import { id } from "date-fns/locale";
 
+// Helper aman memformat waktu, langsung menerima label izin dari logika utama
+const formatTimeSafe = (timeData, injectLabel) => {
+  if (!timeData) return "--:--";
+
+  // Deteksi teks [AUTO-INJECT] dari database
+  if (
+    timeData === "[AUTO-INJECT]" ||
+    (typeof timeData === "string" && timeData.includes("AUTO-INJECT"))
+  ) {
+    return injectLabel || "Izin Disetujui";
+  }
+
+  try {
+    const dateObj = timeData?.toDate ? timeData.toDate() : new Date(timeData);
+    if (isNaN(dateObj.getTime())) return "--:--";
+    return format(dateObj, "HH:mm");
+  } catch (e) {
+    return "--:--";
+  }
+};
+
 export default function Riwayat() {
   const { user } = useAuth();
   const currentDate = new Date();
@@ -45,9 +66,10 @@ export default function Riwayat() {
   useEffect(() => {
     const fetchHistory = async () => {
       setLoading(true);
-      if (user) {
+      if (user && user.school_id) {
         const data = await attendanceService.getHistory(
           user.nip,
+          user.school_id,
           selectedMonth,
           selectedYear,
         );
@@ -120,7 +142,6 @@ export default function Riwayat() {
       {/* LIST RIWAYAT SECTION */}
       <div className="px-5 mt-6 space-y-4">
         {loading ? (
-          // Skeleton Loading
           [1, 2, 3].map((n) => (
             <div
               key={n}
@@ -134,7 +155,6 @@ export default function Riwayat() {
             </div>
           ))
         ) : history.length === 0 ? (
-          // Empty State
           <div className="text-center py-12">
             <div className="w-20 h-20 bg-gray-200/50 rounded-full flex items-center justify-center mx-auto mb-4">
               <Calendar size={32} className="text-gray-400" />
@@ -145,15 +165,15 @@ export default function Riwayat() {
             </p>
           </div>
         ) : (
-          // List Item
           history.map((item) => {
             const dateObj = parseISO(item.date);
 
             // ==========================================
-            // LOGIKA BARU: BACA ABSEN NORMAL VS INJEKSI
+            // LOGIKA OVERRIDE DETEKSI IZIN/CUTI (ARSITEKTUR BARU)
             // ==========================================
-            const note = (item.notes || "").toUpperCase();
-            const isAutoInject = note.includes("[AUTO-INJECT");
+            const isAutoInject =
+              item.is_auto_injected === true ||
+              item.check_in?.time === "[AUTO-INJECT]";
             const isCompleted =
               item.status === "Memenuhi Target" || item.total_hours >= 8;
 
@@ -161,25 +181,34 @@ export default function Riwayat() {
             let badgeClass = "";
 
             if (isAutoInject) {
-              // Jika ini adalah absen hasil pengajuan Izin/Sakit/Cuti
-              if (note.includes("CUTI")) {
+              const statusVal = (item.status || "").toLowerCase();
+              if (statusVal === "cuti") {
                 badgeLabel = "Cuti";
                 badgeClass = "bg-purple-50 text-purple-600 border-purple-200";
-              } else if (note.includes("SAKIT")) {
+              } else if (statusVal === "sakit") {
                 badgeLabel = "Sakit";
                 badgeClass = "bg-orange-50 text-orange-600 border-orange-200";
-              } else if (note.includes("IZIN KEDINASAN")) {
+              } else if (statusVal === "izin_kedinasan") {
                 badgeLabel = "Izin Kedinasan";
                 badgeClass = "bg-blue-50 text-blue-600 border-blue-200";
               } else if (
-                note.includes("IZIN PRIBADI") ||
-                note.includes("IZIN")
+                statusVal === "izin_pribadi" ||
+                statusVal.includes("izin")
               ) {
                 badgeLabel = "Izin Pribadi";
                 badgeClass = "bg-blue-50 text-blue-600 border-blue-200";
+              } else {
+                // Fallback dinamis jika ada status jenis lain di masa depan
+                badgeLabel =
+                  statusVal
+                    .split("_")
+                    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                    .join(" ") || "Izin Disetujui";
+                badgeClass =
+                  "bg-emerald-50 text-emerald-600 border-emerald-200";
               }
             } else {
-              // Jika ini adalah absen fisik biasa
+              // Logika Absen Fisik Normal
               if (!item.check_out) {
                 badgeLabel = "Belum Pulang";
                 badgeClass = "bg-blue-50 text-blue-600 border-blue-200";
@@ -193,7 +222,7 @@ export default function Riwayat() {
               }
             }
 
-            // Logika Menghitung Kekurangan Jam (Hanya untuk absen normal yang kurang dari 8 jam)
+            // Hitung kekurangan jam khusus untuk absen fisik yang kurang
             let shortText = null;
             if (
               item.check_out &&
@@ -201,7 +230,7 @@ export default function Riwayat() {
               item.total_hours < 8 &&
               !isAutoInject
             ) {
-              const targetMinutes = 8 * 60; // 480 menit
+              const targetMinutes = 8 * 60;
               const workedMinutes = Math.round(item.total_hours * 60);
               const shortfall = targetMinutes - workedMinutes;
 
@@ -248,14 +277,8 @@ export default function Riwayat() {
                         Masuk
                       </p>
                       <p className="font-bold text-gray-800">
-                        {item.check_in
-                          ? format(
-                              item.check_in.time?.toDate
-                                ? item.check_in.time.toDate()
-                                : new Date(item.check_in.time),
-                              "HH:mm",
-                            )
-                          : "--:--"}
+                        {/* Suntik label dinamis ke fungsi formatTimeSafe */}
+                        {formatTimeSafe(item.check_in?.time, badgeLabel)}
                       </p>
                     </div>
                   </div>
@@ -269,20 +292,13 @@ export default function Riwayat() {
                         Pulang
                       </p>
                       <p className="font-bold text-gray-800">
-                        {item.check_out
-                          ? format(
-                              item.check_out.time?.toDate
-                                ? item.check_out.time.toDate()
-                                : new Date(item.check_out.time),
-                              "HH:mm",
-                            )
-                          : "--:--"}
+                        {formatTimeSafe(item.check_out?.time, badgeLabel)}
                       </p>
                     </div>
                   </div>
                 </div>
 
-                {/* Total Jam Kerja & Kekurangan (Hanya muncul jika check_out ada) */}
+                {/* Total Jam Kerja & Kekurangan */}
                 {item.check_out && (
                   <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1 mt-1 border border-gray-100">
                     <div className="flex justify-between items-center">
@@ -298,7 +314,6 @@ export default function Riwayat() {
                       </span>
                     </div>
 
-                    {/* Muncul hanya jika ada teks kurang jam */}
                     {shortText && (
                       <div className="flex justify-end items-center gap-1.5 mt-0.5">
                         <AlertCircle size={12} className="text-orange-500" />

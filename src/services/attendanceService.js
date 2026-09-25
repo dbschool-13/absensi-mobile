@@ -15,12 +15,10 @@ import toast from "react-hot-toast";
 import { format } from "date-fns";
 
 // =================================================================
-// HAKIM MUTLAK: Mengambil waktu langsung dari satelit sedetik
-// sebelum data dimasukkan ke Database (Mengabaikan jam dari HP)
+// PENCARI WAKTU DUAL-SERVER
 // =================================================================
 const getAbsoluteTrueTime = async (fallbackTime) => {
   try {
-    // SERVER 1 (TIMEAPI)
     const res = await fetch(
       `https://timeapi.io/api/Time/current/zone?timeZone=UTC&nocache=${Date.now()}`,
       { cache: "no-store" },
@@ -32,7 +30,6 @@ const getAbsoluteTrueTime = async (fallbackTime) => {
     throw new Error("S1 Gagal");
   } catch (err) {
     try {
-      // SERVER 2 CADANGAN (WORLDTIMEAPI)
       const res2 = await fetch(
         `https://worldtimeapi.org/api/timezone/Etc/UTC?nocache=${Date.now()}`,
         { cache: "no-store" },
@@ -49,11 +46,13 @@ const getAbsoluteTrueTime = async (fallbackTime) => {
 };
 
 export const attendanceService = {
-  // 1. Ambil status absen hari ini
-  getTodayAttendance: async (userId) => {
+  // 1. Ambil status absen hari ini (DITAMBAH SCHOOL ID)
+  getTodayAttendance: async (userId, schoolId) => {
+    if (!schoolId) return null;
     try {
       const docId = `${userId}_${getTodayString()}`;
-      const docRef = doc(db, "attendances", docId);
+      // PERUBAHAN PATH SUB-KOLEKSI
+      const docRef = doc(db, `schools/${schoolId}/attendances`, docId);
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
@@ -73,7 +72,7 @@ export const attendanceService = {
     latitude,
     longitude,
     distance,
-    photoUrl, // Dibiarkan sebagai placeholder agar urutan parameter Dashboard tidak rusak
+    photoUrl, // Placeholder
     clientTimestamp = new Date().toISOString(),
     isOfflineSync = false,
   ) => {
@@ -87,9 +86,8 @@ export const attendanceService = {
       const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
 
       const docId = `${userId}_${trueDateStr}`;
-      const docRef = doc(db, "attendances", docId);
-
-      const deviceInfo = navigator.userAgent;
+      // PERUBAHAN PATH SUB-KOLEKSI
+      const docRef = doc(db, `schools/${schoolId}/attendances`, docId);
 
       const payload = {
         user_id: userId,
@@ -100,8 +98,7 @@ export const attendanceService = {
           latitude,
           longitude,
           distance_meters: distance,
-          device_info: deviceInfo,
-          // photo_url SUDAH DIHAPUS SEPENUHNYA DARI SINI
+          device_info: navigator.userAgent,
         },
         check_out: null,
         total_hours: 0,
@@ -123,11 +120,12 @@ export const attendanceService = {
   // 3. Proses Absen Pulang
   checkOut: async (
     userId,
+    schoolId, // DITAMBAHKAN SCHOOL ID SEBAGAI PARAMETER KEDUA
     latitude,
     longitude,
     distance,
     checkInTime,
-    photoUrl, // Placeholder
+    photoUrl,
     clientTimestamp = new Date().toISOString(),
     isOfflineSync = false,
   ) => {
@@ -141,11 +139,18 @@ export const attendanceService = {
       const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
 
       const docId = `${userId}_${trueDateStr}`;
-      const docRef = doc(db, "attendances", docId);
+      // PERUBAHAN PATH SUB-KOLEKSI
+      const docRef = doc(db, `schools/${schoolId}/attendances`, docId);
 
-      const checkInDate = checkInTime?.toDate
-        ? checkInTime.toDate()
-        : new Date(checkInTime);
+      // Pengaman kebal string [AUTO-INJECT] di level service
+      let checkInDate;
+      if (checkInTime === "[AUTO-INJECT]") {
+        checkInDate = absoluteDateObj; // Fallback agar tidak NaN
+      } else {
+        checkInDate = checkInTime?.toDate
+          ? checkInTime.toDate()
+          : new Date(checkInTime);
+      }
 
       const totalHours = calculateWorkHours(checkInDate, absoluteDateObj);
       const finalStatus = totalHours >= 8 ? "Memenuhi Target" : "Kurang Jam";
@@ -156,7 +161,6 @@ export const attendanceService = {
           latitude,
           longitude,
           distance_meters: distance,
-          // photo_url SUDAH DIHAPUS SEPENUHNYA DARI SINI
         },
         total_hours: totalHours,
         status: finalStatus,
@@ -174,17 +178,18 @@ export const attendanceService = {
     }
   },
 
-  // 4. Ambil Riwayat Absen berdasarkan Bulan & Tahun
-  getHistory: async (userId, month, year) => {
+  // 4. Ambil Riwayat Absen (DITAMBAH SCHOOL ID)
+  getHistory: async (userId, schoolId, month, year) => {
+    if (!schoolId) return [];
     try {
+      // PERUBAHAN PATH SUB-KOLEKSI
       const q = query(
-        collection(db, "attendances"),
+        collection(db, `schools/${schoolId}/attendances`),
         where("user_id", "==", userId),
       );
 
       const querySnapshot = await getDocs(q);
       const history = [];
-
       const searchPrefix = `${year}-${month}`;
 
       querySnapshot.forEach((doc) => {

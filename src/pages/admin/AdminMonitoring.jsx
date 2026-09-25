@@ -7,15 +7,14 @@ import { format } from "date-fns";
 import { id } from "date-fns/locale";
 import { Users, CheckCircle2, XCircle, Clock } from "lucide-react";
 
-// Helper untuk membaca waktu dari Firebase Timestamp ATAU ISO String (Suntikan Izin)
+// Helper aman membaca waktu, menangani string "[AUTO-INJECT]" agar tidak error saat sorting
 const getValidTime = (timeData) => {
-  if (!timeData) return 0;
-  // Jika formatnya Timestamp dari Firebase
+  if (!timeData || timeData === "[AUTO-INJECT]") return 0;
   if (typeof timeData.toDate === "function") {
     return timeData.toDate().getTime();
   }
-  // Jika formatnya String ISO dari sistem suntik absen
-  return new Date(timeData).getTime();
+  const parsed = new Date(timeData).getTime();
+  return isNaN(parsed) ? 0 : parsed;
 };
 
 export default function AdminMonitoring() {
@@ -45,9 +44,12 @@ export default function AdminMonitoring() {
   useEffect(() => {
     if (user?.school_id) {
       const today = format(new Date(), "yyyy-MM-dd");
+
+      // ==========================================================
+      // PERBAIKAN 1: Baca langsung dari Sub-Koleksi Sekolah
+      // ==========================================================
       const q = query(
-        collection(db, "attendances"),
-        where("school_id", "==", user.school_id),
+        collection(db, `schools/${user.school_id}/attendances`),
         where("date", "==", today),
       );
 
@@ -64,21 +66,20 @@ export default function AdminMonitoring() {
   }, [user]);
 
   // ==========================================================
-  // PERBAIKAN LOGIKA PEMBACAAN STATUS IZIN (AUTO-INJECT)
+  // PERBAIKAN 2: Logika Pembacaan Auto-Inject Arsitektur Baru
   // ==========================================================
   const monitoringData = teachers
     .map((guru) => {
       const absenHariIni = realtimeAtt.find((att) => att.user_id === guru.nip);
 
-      // Definisikan status default
       let isHadir = false;
       let isAutoInject = false;
 
       if (absenHariIni) {
-        const note = (absenHariIni.notes || "").toUpperCase();
-        isAutoInject = note.includes("[AUTO-INJECT");
-
-        // Dianggap "Ada Kejelasan Status" jika: punya check_in ATAU disuntik sistem (izin/cuti)
+        isAutoInject =
+          absenHariIni.is_auto_injected === true ||
+          absenHariIni.check_in?.time === "[AUTO-INJECT]";
+        // Dianggap "Ada Kejelasan Status" jika absen fisik atau disuntik izin
         isHadir = !!absenHariIni.check_in || isAutoInject;
       }
 
@@ -109,12 +110,27 @@ export default function AdminMonitoring() {
     });
 
   const totalPegawai = teachers.length;
-  // Yang dihitung "Sudah Hadir" di kotak atas adalah mereka yang benar-benar absen (bukan yang 0 Jam)
-  const totalHadir = realtimeAtt.filter(
-    (att) =>
-      !att.notes?.includes("[AUTO-INJECT: SAKIT]") &&
-      !att.notes?.includes("[AUTO-INJECT: IZIN PRIBADI]"),
-  ).length;
+
+  // ==========================================================
+  // PERBAIKAN 3: Hitung "Sudah Hadir" Berdasarkan Status Baru
+  // ==========================================================
+  const totalHadir = realtimeAtt.filter((att) => {
+    const isInject =
+      att.is_auto_injected === true || att.check_in?.time === "[AUTO-INJECT]";
+    const statusVal = (att.status || "").toLowerCase();
+
+    // Jangan hitung sebagai hadir jika statusnya Sakit atau Izin Pribadi (0 Jam Kerja)
+    if (
+      isInject &&
+      (statusVal === "sakit" ||
+        statusVal === "izin_pribadi" ||
+        statusVal.includes("izin"))
+    ) {
+      return false;
+    }
+    return true;
+  }).length;
+
   const totalBelum = totalPegawai - totalHadir;
 
   return (
@@ -217,7 +233,7 @@ export default function AdminMonitoring() {
                   const isHadir = !!att?.check_in;
                   const isPulang = !!att?.check_out;
                   const isAutoInject = data.isAutoInject;
-                  const note = (att?.notes || "").toUpperCase();
+                  const statusVal = (att?.status || "").toLowerCase();
 
                   let statusBadge = (
                     <span className="bg-red-50 text-red-500 px-3 py-1.5 rounded-full text-xs font-bold border border-red-100">
@@ -230,8 +246,10 @@ export default function AdminMonitoring() {
 
                   if (att) {
                     if (isAutoInject) {
-                      // LOGIKA KHUSUS UNTUK YANG IZIN/CUTI
-                      if (note.includes("CUTI")) {
+                      // ==========================================================
+                      // PERBAIKAN 4: Cek Jenis Izin Berdasarkan Field "status"
+                      // ==========================================================
+                      if (statusVal === "cuti") {
                         statusBadge = (
                           <span className="bg-purple-100 text-purple-600 px-3 py-1.5 rounded-full text-xs font-bold border border-purple-200">
                             Cuti
@@ -240,13 +258,13 @@ export default function AdminMonitoring() {
                         inTime = "07:00";
                         outTime = "15:00";
                         isTargetMet = true;
-                      } else if (note.includes("SAKIT")) {
+                      } else if (statusVal === "sakit") {
                         statusBadge = (
                           <span className="bg-orange-100 text-orange-600 px-3 py-1.5 rounded-full text-xs font-bold border border-orange-200">
                             Sakit
                           </span>
                         );
-                      } else if (note.includes("IZIN KEDINASAN")) {
+                      } else if (statusVal === "izin_kedinasan") {
                         statusBadge = (
                           <span className="bg-blue-100 text-blue-600 px-3 py-1.5 rounded-full text-xs font-bold border border-blue-200">
                             Izin Kedinasan
@@ -255,15 +273,29 @@ export default function AdminMonitoring() {
                         inTime = "07:00";
                         outTime = "15:00";
                         isTargetMet = true;
-                      } else if (note.includes("IZIN")) {
+                      } else if (
+                        statusVal === "izin_pribadi" ||
+                        statusVal.includes("izin")
+                      ) {
                         statusBadge = (
                           <span className="bg-blue-100 text-blue-600 px-3 py-1.5 rounded-full text-xs font-bold border border-blue-200">
                             Izin Pribadi
                           </span>
                         );
+                      } else {
+                        // Fallback dinamis
+                        const fallbackLabel =
+                          statusVal
+                            .split("_")
+                            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                            .join(" ") || "Izin Disetujui";
+                        statusBadge = (
+                          <span className="bg-emerald-100 text-emerald-600 px-3 py-1.5 rounded-full text-xs font-bold border border-emerald-200">
+                            {fallbackLabel}
+                          </span>
+                        );
                       }
                     } else if (isHadir) {
-                      // LOGIKA NORMAL UNTUK YANG HADIR FISIK
                       inTime = format(getValidTime(att.check_in.time), "HH:mm");
                       isTargetMet =
                         att.status === "Memenuhi Target" ||
@@ -337,7 +369,6 @@ export default function AdminMonitoring() {
                           >
                             {outTime}
                           </span>
-                          {/* Hanya tampilkan label Target/Kurang Jam jika ada jam pulangnya */}
                           {outTime !== "--:--" && (
                             <span
                               className={`text-[9px] px-2 py-0.5 rounded-md font-bold uppercase tracking-wider border ${

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { useAuth } from "../../contexts/AuthContext";
-// IMPORT TAMBAHAN: panggil leaveService untuk mengecek pengajuan
-import { leaveService } from "../../services/leaveService";
+import { useAuth } from "../../contexts/AuthContext"; // Pastikan path context Anda benar
+import { db } from "../../services/firebase"; // Import db Firestore
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import {
   LayoutDashboard,
   FileSpreadsheet,
@@ -11,12 +11,12 @@ import {
   School,
   Settings,
   Activity,
-  Bell, // Icon tambahan opsional jika ingin mengubah icon approve
+  Bell, 
 } from "lucide-react";
-import GlobalLoader from "../ui/GlobalLoader";
+import GlobalLoader from "../../components/ui/GlobalLoader";
 
 export default function AdminLayout() {
-  const { user, schoolData, logout, setGlobalLoading } = useAuth();
+  const { user, schoolData, logout } = useAuth();
   const navigate = useNavigate();
 
   // STATE BARU: Untuk menyimpan jumlah pengajuan yang belum diproses
@@ -27,25 +27,25 @@ export default function AdminLayout() {
     navigate("/login");
   };
 
-  // EFFECT BARU: Mengecek pengajuan izin secara berkala
+  // EFFECT BARU: Mengecek pengajuan izin secara REAL-TIME (Tanpa Interval)
   useEffect(() => {
     if (!user?.school_id) return;
 
-    const fetchPendingCount = async () => {
-      try {
-        const data = await leaveService.getPendingRequests(user.school_id);
-        setPendingLeaveCount(data.length);
-      } catch (error) {
-        console.error("Gagal menarik notifikasi pengajuan:", error);
-      }
-    };
+    // ✅ PERBAIKAN: Arahkan langsung ke kamar Sub-Koleksi Sekolah
+    const q = query(
+      collection(db, `schools/${user.school_id}/leave_requests`),
+      where("status", "==", "pending") // Hanya hitung yang pending
+    );
 
-    // Panggil sekali saat aplikasi pertama kali dimuat
-    fetchPendingCount();
+    // Buka saluran real-time. Tiap ada surat masuk, Firebase otomatis mengirim data ke sini.
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setPendingLeaveCount(snapshot.size); // snapshot.size adalah jumlah dokumen yang ditangkap
+    }, (error) => {
+      console.error("Gagal mendengarkan notifikasi:", error);
+    });
 
-    // Jalankan pengecekan otomatis di latar belakang setiap 15 detik (Real-time feeling)
-    const interval = setInterval(fetchPendingCount, 15000);
-    return () => clearInterval(interval);
+    // Tutup saluran saat Admin pindah atau menutup halaman
+    return () => unsubscribe();
   }, [user]);
 
   const navItemClass = ({ isActive }) =>
@@ -68,7 +68,7 @@ export default function AdminLayout() {
               <img
                 src={schoolData.logo_url}
                 alt="Logo"
-                className="w-full h-full object-contain"
+                className="w-full h-full object-contain rounded-full"
               />
             ) : (
               <School className="text-primary" size={20} />

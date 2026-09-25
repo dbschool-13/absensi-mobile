@@ -146,7 +146,7 @@ export default function AdminRekap() {
   }, [user, availableWeeks]);
 
   // ====================================================
-  // PERBAIKAN: KUNCI DATA HANYA PADA HARI EFEKTIF SAJA
+  // PERBAIKAN: LOGIKA AUTO-INJECT PADA REKAPITULASI
   // ====================================================
   useEffect(() => {
     if (teachers.length > 0) {
@@ -165,7 +165,6 @@ export default function AdminRekap() {
       const rTabel = [];
       const rMingguan = [];
 
-      // Kumpulkan semua daftar TANGGAL EFEKTIF untuk bulan/minggu yang dipilih
       const allValidDates = new Set(
         availableWeeks.flatMap((w) =>
           w.dates.map((d) => format(d, "yyyy-MM-dd")),
@@ -177,7 +176,6 @@ export default function AdminRekap() {
           (att) => att.user_id === guru.nip,
         );
 
-        // FILTER KETAT: Abaikan data yang tanggalnya tidak ada di dalam allValidDates
         const absensiAktif = targetWeek
           ? absensiGuru.filter((att) =>
               targetWeek.dates.some(
@@ -192,18 +190,20 @@ export default function AdminRekap() {
         let countCuti = 0;
 
         absensiAktif.forEach((att) => {
-          const note = (att.notes || "").toUpperCase();
-          const isAutoInject = note.includes("[AUTO-INJECT");
+          const isAutoInject =
+            att.is_auto_injected === true ||
+            att.check_in?.time === "[AUTO-INJECT]";
 
           if (isAutoInject) {
-            if (note.includes("CUTI")) {
+            const statusVal = (att.status || "").toLowerCase();
+            if (statusVal === "cuti") {
               countCuti++;
-            } else if (note.includes("SAKIT")) {
+            } else if (statusVal === "sakit") {
               countSakit++;
             } else if (
-              note.includes("IZIN PRIBADI") ||
-              note.includes("IZIN KEDINASAN") ||
-              note.includes("IZIN")
+              statusVal === "izin_kedinasan" ||
+              statusVal === "izin_pribadi" ||
+              statusVal.includes("izin")
             ) {
               countIzin++;
             } else {

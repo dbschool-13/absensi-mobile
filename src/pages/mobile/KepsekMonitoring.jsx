@@ -13,6 +13,16 @@ import {
   User as UserIcon,
 } from "lucide-react";
 
+// Helper aman membaca waktu, menangani string "[AUTO-INJECT]" agar tidak crash
+const getValidTime = (timeData) => {
+  if (!timeData || timeData === "[AUTO-INJECT]") return null;
+  if (typeof timeData.toDate === "function") {
+    return timeData.toDate().getTime();
+  }
+  const parsed = new Date(timeData).getTime();
+  return isNaN(parsed) ? null : parsed;
+};
+
 export default function KepsekMonitoring() {
   const { user } = useAuth();
 
@@ -35,9 +45,10 @@ export default function KepsekMonitoring() {
   useEffect(() => {
     if (user?.school_id) {
       const today = format(new Date(), "yyyy-MM-dd");
+
+      // PERBAIKAN 1: Membaca ke sub-koleksi spesifik sekolah
       const q = query(
-        collection(db, "attendances"),
-        where("school_id", "==", user.school_id),
+        collection(db, `schools/${user.school_id}/attendances`),
         where("date", "==", today),
       );
 
@@ -53,20 +64,41 @@ export default function KepsekMonitoring() {
     }
   }, [user]);
 
+  // PERBAIKAN 2: Logika Deteksi Hadir & Auto-Inject
   const monitoringData = teachers
     .map((guru) => {
       const absenHariIni = realtimeAtt.find((att) => att.user_id === guru.nip);
-      return { ...guru, absen: absenHariIni || null };
+
+      let isHadir = false;
+      let isAutoInject = false;
+
+      if (absenHariIni) {
+        isAutoInject =
+          absenHariIni.is_auto_injected === true ||
+          absenHariIni.check_in?.time === "[AUTO-INJECT]";
+        isHadir = !!absenHariIni.check_in || isAutoInject;
+      }
+
+      return {
+        ...guru,
+        absen: absenHariIni || null,
+        isHadirRecord: isHadir,
+        isAutoInject: isAutoInject,
+      };
     })
     .sort((a, b) => {
-      const aHadir = !!a.absen?.check_in;
-      const bHadir = !!b.absen?.check_in;
+      if (a.isHadirRecord && !b.isHadirRecord) return -1;
+      if (!a.isHadirRecord && b.isHadirRecord) return 1;
 
-      if (aHadir && !bHadir) return -1;
-      if (!aHadir && bHadir) return 1;
-
-      if (aHadir && bHadir) {
-        return b.absen.check_in.time.toDate() - a.absen.check_in.time.toDate();
+      if (
+        a.isHadirRecord &&
+        b.isHadirRecord &&
+        a.absen?.check_in &&
+        b.absen?.check_in
+      ) {
+        const timeA = getValidTime(a.absen.check_in.time) || 0;
+        const timeB = getValidTime(b.absen.check_in.time) || 0;
+        return timeB - timeA;
       }
       return a.name.localeCompare(b.name);
     });
@@ -76,7 +108,22 @@ export default function KepsekMonitoring() {
   );
 
   const totalPegawai = teachers.length;
-  const totalHadir = realtimeAtt.length;
+  // Menghitung status hadir yang sebenarnya (tidak memasukkan yang berstatus izin 0 jam/sakit)
+  const totalHadir = realtimeAtt.filter((att) => {
+    const isInject =
+      att.is_auto_injected === true || att.check_in?.time === "[AUTO-INJECT]";
+    const statusVal = (att.status || "").toLowerCase();
+    if (
+      isInject &&
+      (statusVal === "sakit" ||
+        statusVal === "izin_pribadi" ||
+        statusVal.includes("izin"))
+    ) {
+      return false;
+    }
+    return true;
+  }).length;
+
   const totalBelum = totalPegawai - totalHadir;
 
   return (
@@ -169,11 +216,99 @@ export default function KepsekMonitoring() {
             </div>
           ) : (
             filteredData.map((data) => {
-              const isHadir = !!data.absen?.check_in;
-              const isPulang = !!data.absen?.check_out;
-              const isTargetMet =
-                data.absen?.status === "Memenuhi Target" ||
-                data.absen?.total_hours >= 8;
+              const att = data.absen;
+              const isAutoInject = data.isAutoInject;
+              const isHadir = !!att?.check_in;
+              const isPulang = !!att?.check_out;
+
+              let statusBadge = (
+                <span className="bg-red-50 text-red-500 px-2 py-1 rounded-md text-[10px] font-bold">
+                  Belum
+                </span>
+              );
+
+              let inTime = "--:--";
+              let outTime = "--:--";
+              let isTargetMet = false;
+
+              // PERBAIKAN 3: Menyusun data kartu berdasarkan jenis izin (arsitektur baru)
+              if (att) {
+                if (isAutoInject) {
+                  const statusVal = (att.status || "").toLowerCase();
+                  if (statusVal === "cuti") {
+                    statusBadge = (
+                      <span className="bg-purple-100 text-purple-600 px-2 py-1 rounded-md text-[10px] font-bold">
+                        Cuti
+                      </span>
+                    );
+                    inTime = "07:00";
+                    outTime = "15:00";
+                    isTargetMet = true;
+                  } else if (statusVal === "sakit") {
+                    statusBadge = (
+                      <span className="bg-orange-100 text-orange-600 px-2 py-1 rounded-md text-[10px] font-bold">
+                        Sakit
+                      </span>
+                    );
+                  } else if (statusVal === "izin_kedinasan") {
+                    statusBadge = (
+                      <span className="bg-blue-100 text-blue-600 px-2 py-1 rounded-md text-[10px] font-bold">
+                        Izin Kedinasan
+                      </span>
+                    );
+                    inTime = "07:00";
+                    outTime = "15:00";
+                    isTargetMet = true;
+                  } else if (
+                    statusVal === "izin_pribadi" ||
+                    statusVal.includes("izin")
+                  ) {
+                    statusBadge = (
+                      <span className="bg-blue-100 text-blue-600 px-2 py-1 rounded-md text-[10px] font-bold">
+                        Izin Pribadi
+                      </span>
+                    );
+                  } else {
+                    const fallbackLabel =
+                      statusVal
+                        .split("_")
+                        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                        .join(" ") || "Disetujui";
+                    statusBadge = (
+                      <span className="bg-emerald-100 text-emerald-600 px-2 py-1 rounded-md text-[10px] font-bold">
+                        {fallbackLabel}
+                      </span>
+                    );
+                  }
+                } else if (isHadir) {
+                  const inValid = getValidTime(att.check_in.time);
+                  if (inValid) inTime = format(inValid, "HH:mm");
+
+                  isTargetMet =
+                    att.status === "Memenuhi Target" || att.total_hours >= 8;
+
+                  if (isPulang) {
+                    const outValid = getValidTime(att.check_out.time);
+                    if (outValid) outTime = format(outValid, "HH:mm");
+
+                    statusBadge = (
+                      <span className="bg-indigo-50 text-indigo-600 px-2 py-1 rounded-md text-[10px] font-bold">
+                        Selesai
+                      </span>
+                    );
+                  } else {
+                    statusBadge = (
+                      <span className="bg-emerald-50 text-emerald-600 px-2 py-1 rounded-md text-[10px] font-bold flex items-center gap-1">
+                        Bekerja{" "}
+                        <span className="flex h-1.5 w-1.5 relative">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                        </span>
+                      </span>
+                    );
+                  }
+                }
+              }
 
               return (
                 <div
@@ -190,27 +325,15 @@ export default function KepsekMonitoring() {
                           {data.name}
                         </h4>
                         <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mt-0.5">
-                          {data.role}
+                          {data.role === "kepsek"
+                            ? "Kepala Sekolah"
+                            : data.role === "tendik"
+                            ? "Tenaga Kependidikan"
+                            : "Guru"}
                         </p>
                       </div>
                     </div>
-                    {isPulang ? (
-                      <span className="bg-indigo-50 text-indigo-600 px-2 py-1 rounded-md text-[10px] font-bold">
-                        Selesai
-                      </span>
-                    ) : isHadir ? (
-                      <span className="bg-emerald-50 text-emerald-600 px-2 py-1 rounded-md text-[10px] font-bold flex items-center gap-1">
-                        Bekerja{" "}
-                        <span className="flex h-1.5 w-1.5 relative">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="bg-red-50 text-red-500 px-2 py-1 rounded-md text-[10px] font-bold">
-                        Belum
-                      </span>
-                    )}
+                    {statusBadge}
                   </div>
 
                   <div className="flex gap-4 pt-3 border-t border-gray-50">
@@ -218,10 +341,14 @@ export default function KepsekMonitoring() {
                       <p className="text-[9px] text-gray-400 uppercase font-bold tracking-wider mb-1">
                         Masuk
                       </p>
-                      <p className="font-black text-sm text-gray-800">
-                        {isHadir
-                          ? format(data.absen.check_in.time.toDate(), "HH:mm")
-                          : "--:--"}
+                      <p
+                        className={`font-black text-sm ${
+                          isAutoInject && inTime === "--:--"
+                            ? "text-orange-500"
+                            : "text-gray-800"
+                        }`}
+                      >
+                        {inTime}
                       </p>
                     </div>
                     <div className="w-[1px] bg-gray-100"></div>
@@ -229,15 +356,17 @@ export default function KepsekMonitoring() {
                       <p className="text-[9px] text-gray-400 uppercase font-bold tracking-wider mb-1">
                         Pulang
                       </p>
-                      {isPulang ? (
-                        <div className="flex items-center gap-2">
-                          <p className="font-black text-sm text-gray-800">
-                            {format(
-                              data.absen.check_out.time.toDate(),
-                              "HH:mm",
-                            )}
-                          </p>
-                          {/* BADGE TARGET DI TAMPILAN MOBILE KEPSEK */}
+                      <div className="flex items-center gap-2">
+                        <p
+                          className={`font-black text-sm ${
+                            isAutoInject && outTime === "--:--"
+                              ? "text-orange-500"
+                              : "text-gray-800"
+                          }`}
+                        >
+                          {outTime}
+                        </p>
+                        {outTime !== "--:--" && (
                           <span
                             className={`text-[8px] px-1.5 py-0.5 rounded font-bold uppercase border ${
                               isTargetMet
@@ -247,12 +376,8 @@ export default function KepsekMonitoring() {
                           >
                             {isTargetMet ? "Memenuhi" : "Kurang"}
                           </span>
-                        </div>
-                      ) : (
-                        <p className="font-black text-sm text-gray-800">
-                          --:--
-                        </p>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
