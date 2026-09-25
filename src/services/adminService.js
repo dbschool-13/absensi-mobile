@@ -96,21 +96,28 @@ export const adminService = {
     }
   },
 
-  // 3. Ambil Data Rekap Bulanan
+  // 3. Ambil Data Rekap Bulanan (SUDAH DIOPTIMALISASI)
   getRekapData: async (schoolId, month, year) => {
     if (!schoolId) return [];
     try {
-      const q = collection(db, `schools/${schoolId}/attendances`);
+      // Tentukan batas rentang teks tanggal untuk bulan yang diminta
+      const startDate = `${year}-${month}-01`;
+      const endDate = `${year}-${month}-31`; // Pembacaan string Firestore aman menggunakan 31
+
+      // Tarik hanya dokumen yang tanggalnya berada di dalam bulan tersebut
+      const q = query(
+        collection(db, `schools/${schoolId}/attendances`),
+        where("date", ">=", startDate),
+        where("date", "<=", endDate),
+      );
+
       const snap = await getDocs(q);
       const attendances = [];
-      const searchPrefix = `${year}-${month}`;
 
       snap.forEach((doc) => {
-        const data = doc.data();
-        if (data.date && data.date.startsWith(searchPrefix)) {
-          attendances.push({ id: doc.id, ...data });
-        }
+        attendances.push({ id: doc.id, ...doc.data() });
       });
+
       return attendances;
     } catch (error) {
       console.error("Gagal mengambil rekap data:", error);
