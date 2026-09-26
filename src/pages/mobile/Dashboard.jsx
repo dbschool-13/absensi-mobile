@@ -636,62 +636,83 @@ export default function Dashboard() {
           style={{ animationDelay: "0.3s" }}
         >
           {/* ==================================================== */}
-          {/* PERBAIKAN CARD ABSEN MASUK & PULANG */}
+          {/* KOLOM 1: ABSEN MASUK */}
           {/* ==================================================== */}
-          <div className="bg-white rounded-3xl shadow-lg shadow-gray-200/50 p-5 border border-gray-100 relative overflow-hidden group">
-            <div className="absolute -right-4 -bottom-4 bg-emerald-50 w-24 h-24 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
-            <div className="flex items-center gap-2 text-gray-400 mb-2 relative z-10">
-              <div className="p-1.5 bg-gray-50 rounded-lg">
-                <LogIn size={14} className="text-emerald-500" />
-              </div>
-              <span className="text-[10px] font-bold uppercase tracking-wider">
-                Absen Masuk
+          <div className="flex flex-col gap-2">
+            {/* Label Rentang Waktu Masuk */}
+            <div className="text-center">
+              <span className="bg-emerald-500 text-white text-[9px] font-bold px-3 py-1 rounded-full uppercase tracking-widest border border-gray-200">
+                {timeRules.check_in_start} - {timeRules.check_in_end}
               </span>
             </div>
-            <p className="text-3xl font-black text-gray-800 relative z-10">
-              {isAutoInject ? (
-                <span className="text-xl text-emerald-600 font-bold">
-                  {leaveLabel}
+
+            <div className="bg-white rounded-3xl shadow-lg shadow-gray-200/50 p-5 border border-gray-100 relative overflow-hidden group h-full">
+              <div className="absolute -right-4 -bottom-4 bg-emerald-50 w-24 h-24 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
+              <div className="flex items-center gap-2 text-gray-400 mb-2 relative z-10">
+                <div className="p-1.5 bg-gray-50 rounded-lg">
+                  <LogIn size={14} className="text-emerald-500" />
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider">
+                  Absen Masuk
                 </span>
-              ) : hasCheckedIn ? (
-                format(
-                  todayAtt.check_in.time?.toDate
-                    ? todayAtt.check_in.time.toDate()
-                    : new Date(todayAtt.check_in.time),
-                  "HH:mm",
-                )
-              ) : (
-                "--:--"
-              )}
-            </p>
+              </div>
+              <p className="text-3xl font-black text-gray-800 relative z-10">
+                {isAutoInject ? (
+                  <span className="text-xl text-emerald-600 font-bold">
+                    {leaveLabel}
+                  </span>
+                ) : hasCheckedIn ? (
+                  format(
+                    todayAtt.check_in.time?.toDate
+                      ? todayAtt.check_in.time.toDate()
+                      : new Date(todayAtt.check_in.time),
+                    "HH:mm",
+                  )
+                ) : (
+                  "--:--"
+                )}
+              </p>
+            </div>
           </div>
 
-          <div className="bg-white rounded-3xl shadow-lg shadow-gray-200/50 p-5 border border-gray-100 relative overflow-hidden group">
-            <div className="absolute -right-4 -bottom-4 bg-red-50 w-24 h-24 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
-            <div className="flex items-center gap-2 text-gray-400 mb-2 relative z-10">
-              <div className="p-1.5 bg-gray-50 rounded-lg">
-                <LogOut size={14} className="text-red-500" />
-              </div>
-              <span className="text-[10px] font-bold uppercase tracking-wider">
-                Absen Pulang
+          {/* ==================================================== */}
+          {/* KOLOM 2: ABSEN PULANG */}
+          {/* ==================================================== */}
+          <div className="flex flex-col gap-2">
+            {/* Label Rentang Waktu Pulang */}
+            <div className="text-center">
+              <span className="bg-red-500 text-white text-[9px] font-bold px-3 py-1 rounded-full uppercase tracking-widest border border-gray-200">
+                {timeRules.check_out_start} - {timeRules.check_out_end}
               </span>
             </div>
-            <p className="text-3xl font-black text-gray-800 relative z-10">
-              {isAutoInject ? (
-                <span className="text-xl text-emerald-600 font-bold">
-                  {leaveLabel}
+
+            <div className="bg-white rounded-3xl shadow-lg shadow-gray-200/50 p-5 border border-gray-100 relative overflow-hidden group h-full">
+              <div className="absolute -right-4 -bottom-4 bg-red-50 w-24 h-24 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
+              <div className="flex items-center gap-2 text-gray-400 mb-2 relative z-10">
+                <div className="p-1.5 bg-gray-50 rounded-lg">
+                  <LogOut size={14} className="text-red-500" />
+                </div>
+                <span className="text-[10px] font-bold uppercase tracking-wider">
+                  Absen Pulang
                 </span>
-              ) : hasCheckedOut ? (
-                format(
-                  todayAtt.check_out.time?.toDate
-                    ? todayAtt.check_out.time.toDate()
-                    : new Date(todayAtt.check_out.time),
-                  "HH:mm",
-                )
-              ) : (
-                "--:--"
-              )}
-            </p>
+              </div>
+              <p className="text-3xl font-black text-gray-800 relative z-10">
+                {isAutoInject ? (
+                  <span className="text-xl text-emerald-600 font-bold">
+                    {leaveLabel}
+                  </span>
+                ) : hasCheckedOut ? (
+                  format(
+                    todayAtt.check_out.time?.toDate
+                      ? todayAtt.check_out.time.toDate()
+                      : new Date(todayAtt.check_out.time),
+                    "HH:mm",
+                  )
+                ) : (
+                  "--:--"
+                )}
+              </p>
+            </div>
           </div>
         </div>
       </div>
