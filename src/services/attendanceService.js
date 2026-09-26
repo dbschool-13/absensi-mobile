@@ -108,7 +108,7 @@ export const attendanceService = {
       };
 
       await setDoc(docRef, payload, { merge: true });
-      if (!isOfflineSync) toast.success("Berhasil Absen Datang!");
+      // if (!isOfflineSync) toast.success("Berhasil Absen Datang!");
       return payload;
     } catch (error) {
       console.error("CheckIn error:", error);
@@ -169,7 +169,7 @@ export const attendanceService = {
       };
 
       await updateDoc(docRef, payloadUpdate);
-      if (!isOfflineSync) toast.success("Berhasil Absen Pulang!");
+      // if (!isOfflineSync) toast.success("Berhasil Absen Pulang!");
       return payloadUpdate;
     } catch (error) {
       console.error("CheckOut error:", error);

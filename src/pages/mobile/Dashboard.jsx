@@ -84,6 +84,12 @@ export default function Dashboard() {
   const [isMapReady, setIsMapReady] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  const [successModal, setSuccessModal] = useState({
+    isOpen: false,
+    type: "",
+    time: "",
+  });
+
   useEffect(() => {
     const fetchTodayAtt = async () => {
       if (navigator.onLine) await syncServerTime();
@@ -248,6 +254,7 @@ export default function Dashboard() {
     try {
       const timestampAsli = getSecureTime().toISOString();
       if (isOffline) {
+        // ... (Logika offline tetap sama) ...
         const attendancePayload = {
           id: Date.now().toString(),
           type: modalType,
@@ -266,9 +273,11 @@ export default function Dashboard() {
         localStorage.setItem("offline_attendance", JSON.stringify(queue));
         setPendingSync(queue.length);
         toast.success("📶 Disimpan offline. Dikirim otomatis saat online.");
+        closeModal();
       } else {
+        let result = null;
         if (modalType === "datang") {
-          const result = await attendanceService.checkIn(
+          result = await attendanceService.checkIn(
             user.nip,
             user.school_id,
             latitude,
@@ -279,7 +288,7 @@ export default function Dashboard() {
           );
           if (result) setTodayAtt({ ...todayAtt, ...result });
         } else if (modalType === "pulang") {
-          const result = await attendanceService.checkOut(
+          result = await attendanceService.checkOut(
             user.nip,
             user.school_id,
             latitude,
@@ -291,10 +300,20 @@ export default function Dashboard() {
           );
           if (result) setTodayAtt((prev) => ({ ...prev, ...result }));
         }
+
+        // TAMPILKAN MODAL SUKSES JIKA BERHASIL
+        if (result) {
+          closeModal(); // Tutup modal konfirmasi
+          setSuccessModal({
+            isOpen: true,
+            type: modalType,
+            time: format(new Date(timestampAsli), "HH:mm"),
+          });
+        }
       }
-      closeModal();
     } catch (error) {
       toast.error("Terjadi kesalahan.");
+      closeModal();
     } finally {
       setIsSaving(false);
     }
@@ -355,7 +374,13 @@ export default function Dashboard() {
     currentHM >= timeRules.check_out_start &&
     currentHM <= timeRules.check_out_end;
 
-  const isAbsenTutup = currentHM > timeRules.check_out_end;
+  // LOGIKA TUTUP REAL-TIME BARU
+  // Datang ditutup jika lewat batas datangnya sendiri, ATAU jika batas pulang sudah lewat.
+  const isDatangTutup =
+    currentHM > timeRules.check_in_end || currentHM > timeRules.check_out_end;
+
+  // Pulang ditutup jika lewat batas akhirnya
+  const isPulangTutup = currentHM > timeRules.check_out_end;
 
   const targetMinutes = 8 * 60;
   let workedMinutes = 0;
@@ -766,14 +791,14 @@ export default function Dashboard() {
                 hasCheckedIn ||
                 !isCheckInTimeValid ||
                 !isWorkingDay ||
-                isAbsenTutup
+                isDatangTutup
               }
               className={`flex-1 py-4 rounded-[1.5rem] transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden ${
                 hasCheckedIn ||
                 (!isCheckInTimeValid && !hasCheckedIn) ||
                 !isInRadius ||
                 !isWorkingDay ||
-                isAbsenTutup
+                isDatangTutup
                   ? "bg-gray-100 text-gray-400 opacity-90"
                   : "bg-emerald-500 text-white shadow-lg shadow-emerald-500/40 btn-active-pulse"
               }`}
@@ -781,16 +806,16 @@ export default function Dashboard() {
               <span className="font-bold text-sm tracking-wide">
                 {!isWorkingDay
                   ? "Libur"
-                  : isAbsenTutup
+                  : isDatangTutup
                   ? "Absen Tutup"
                   : hasCheckedIn
                   ? "Sudah Absen"
                   : "Absen Datang"}
               </span>
-              {/* Keterangan "Luar Jam" muncul jika belum absen, hari kerja, belum tutup, TAPI di luar rentang jam absen */}
+              {/* Keterangan "Luar Jam" muncul jika belum absen, belum tutup, hari kerja, tapi di luar rentang */}
               {!hasCheckedIn &&
                 isWorkingDay &&
-                !isAbsenTutup &&
+                !isDatangTutup &&
                 !isCheckInTimeValid && (
                   <span className="text-[9px] uppercase font-bold tracking-widest text-red-400">
                     Luar Jam
@@ -806,7 +831,7 @@ export default function Dashboard() {
                 hasCheckedOut ||
                 !isCheckOutTimeValid ||
                 !isWorkingDay ||
-                isAbsenTutup
+                isPulangTutup
               }
               className={`flex-1 py-4 rounded-[1.5rem] transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden ${
                 !hasCheckedIn ||
@@ -814,7 +839,7 @@ export default function Dashboard() {
                 (!isCheckOutTimeValid && hasCheckedIn && !hasCheckedOut) ||
                 !isInRadius ||
                 !isWorkingDay ||
-                isAbsenTutup
+                isPulangTutup
                   ? "bg-gray-100 text-gray-400 opacity-90"
                   : "bg-red-500 text-white shadow-lg shadow-red-500/40 btn-active-pulse"
               }`}
@@ -822,17 +847,17 @@ export default function Dashboard() {
               <span className="font-bold text-sm tracking-wide">
                 {!isWorkingDay
                   ? "Libur"
-                  : isAbsenTutup
+                  : isPulangTutup
                   ? "Absen Tutup"
                   : hasCheckedOut
                   ? "Sudah Absen"
                   : "Absen Pulang"}
               </span>
-              {/* Keterangan "Luar Jam" muncul jika sudah datang, belum pulang, hari kerja, belum tutup, TAPI belum masuk jam pulang */}
+              {/* Keterangan "Luar Jam" muncul jika sudah absen datang, belum pulang, belum tutup, tapi di luar rentang */}
               {hasCheckedIn &&
                 !hasCheckedOut &&
                 isWorkingDay &&
-                !isAbsenTutup &&
+                !isPulangTutup &&
                 !isCheckOutTimeValid && (
                   <span className="text-[9px] uppercase font-bold tracking-widest text-red-400">
                     Luar Jam
@@ -945,6 +970,51 @@ export default function Dashboard() {
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================== */}
+      {/* MODAL SUKSES ABSEN */}
+      {/* ==================================================== */}
+      {successModal.isOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm transition-opacity px-5">
+          <div
+            className="absolute inset-0"
+            onClick={() =>
+              setSuccessModal({ isOpen: false, type: "", time: "" })
+            }
+          ></div>
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden animate-fade-in-up relative z-10 p-8 flex flex-col items-center text-center border-4 border-emerald-50">
+            <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-5 shadow-inner">
+              <CheckCircle size={50} className="text-emerald-500" />
+            </div>
+
+            <h3 className="text-xl font-black text-gray-800 mb-1 tracking-tight">
+              Berhasil Absen{" "}
+              {successModal.type === "datang" ? "Datang" : "Pulang"}
+            </h3>
+
+            <div className="bg-gray-50 px-6 py-2 rounded-xl border border-gray-100 my-3">
+              <p className="text-3xl font-black text-emerald-600 tracking-wider">
+                {successModal.time}
+              </p>
+            </div>
+
+            <p className="text-sm font-bold text-gray-500 mb-8 mt-1">
+              {successModal.type === "datang"
+                ? "Selamat Bekerja!"
+                : "Terima kasih, Selamat Beristirahat!"}
+            </p>
+
+            <button
+              onClick={() =>
+                setSuccessModal({ isOpen: false, type: "", time: "" })
+              }
+              className="w-full py-4 rounded-2xl font-black text-white bg-emerald-500 hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-500/40 active:scale-95"
+            >
+              Tutup
+            </button>
           </div>
         </div>
       )}
