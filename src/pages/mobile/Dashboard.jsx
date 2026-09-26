@@ -355,6 +355,8 @@ export default function Dashboard() {
     currentHM >= timeRules.check_out_start &&
     currentHM <= timeRules.check_out_end;
 
+  const isAbsenTutup = currentHM > timeRules.check_out_end;
+
   const targetMinutes = 8 * 60;
   let workedMinutes = 0;
 
@@ -763,13 +765,15 @@ export default function Dashboard() {
                 gpsLoading ||
                 hasCheckedIn ||
                 !isCheckInTimeValid ||
-                !isWorkingDay
+                !isWorkingDay ||
+                isAbsenTutup
               }
               className={`flex-1 py-4 rounded-[1.5rem] transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden ${
                 hasCheckedIn ||
                 (!isCheckInTimeValid && !hasCheckedIn) ||
                 !isInRadius ||
-                !isWorkingDay
+                !isWorkingDay ||
+                isAbsenTutup
                   ? "bg-gray-100 text-gray-400 opacity-90"
                   : "bg-emerald-500 text-white shadow-lg shadow-emerald-500/40 btn-active-pulse"
               }`}
@@ -777,22 +781,23 @@ export default function Dashboard() {
               <span className="font-bold text-sm tracking-wide">
                 {!isWorkingDay
                   ? "Libur"
+                  : isAbsenTutup
+                  ? "Absen Tutup"
                   : hasCheckedIn
                   ? "Sudah Absen"
                   : "Absen Datang"}
               </span>
-              {!hasCheckedIn && isWorkingDay && (
-                <span
-                  className={`text-[9px] uppercase font-bold tracking-widest ${
-                    isCheckInTimeValid ? "text-emerald-100" : "text-red-400"
-                  }`}
-                >
-                  {isCheckInTimeValid
-                    ? `${timeRules.check_in_start} - ${timeRules.check_in_end}`
-                    : "Luar Jam"}
-                </span>
-              )}
+              {/* Keterangan "Luar Jam" muncul jika belum absen, hari kerja, belum tutup, TAPI di luar rentang jam absen */}
+              {!hasCheckedIn &&
+                isWorkingDay &&
+                !isAbsenTutup &&
+                !isCheckInTimeValid && (
+                  <span className="text-[9px] uppercase font-bold tracking-widest text-red-400">
+                    Luar Jam
+                  </span>
+                )}
             </button>
+
             <button
               onClick={() => openModal("pulang")}
               disabled={
@@ -800,14 +805,16 @@ export default function Dashboard() {
                 !hasCheckedIn ||
                 hasCheckedOut ||
                 !isCheckOutTimeValid ||
-                !isWorkingDay
+                !isWorkingDay ||
+                isAbsenTutup
               }
               className={`flex-1 py-4 rounded-[1.5rem] transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden ${
                 !hasCheckedIn ||
                 hasCheckedOut ||
                 (!isCheckOutTimeValid && hasCheckedIn && !hasCheckedOut) ||
                 !isInRadius ||
-                !isWorkingDay
+                !isWorkingDay ||
+                isAbsenTutup
                   ? "bg-gray-100 text-gray-400 opacity-90"
                   : "bg-red-500 text-white shadow-lg shadow-red-500/40 btn-active-pulse"
               }`}
@@ -815,27 +822,27 @@ export default function Dashboard() {
               <span className="font-bold text-sm tracking-wide">
                 {!isWorkingDay
                   ? "Libur"
+                  : isAbsenTutup
+                  ? "Absen Tutup"
                   : hasCheckedOut
                   ? "Sudah Absen"
                   : "Absen Pulang"}
               </span>
-              {hasCheckedIn && !hasCheckedOut && isWorkingDay && (
-                <span
-                  className={`text-[9px] uppercase font-bold tracking-widest ${
-                    isCheckOutTimeValid ? "text-red-100" : "text-red-400"
-                  }`}
-                >
-                  {isCheckOutTimeValid
-                    ? `${timeRules.check_out_start} - ${timeRules.check_out_end}`
-                    : "Luar Jam"}
-                </span>
-              )}
+              {/* Keterangan "Luar Jam" muncul jika sudah datang, belum pulang, hari kerja, belum tutup, TAPI belum masuk jam pulang */}
+              {hasCheckedIn &&
+                !hasCheckedOut &&
+                isWorkingDay &&
+                !isAbsenTutup &&
+                !isCheckOutTimeValid && (
+                  <span className="text-[9px] uppercase font-bold tracking-widest text-red-400">
+                    Luar Jam
+                  </span>
+                )}
             </button>
           </div>
         )}
       </div>
 
-      {/* Modal JSX tetap sama... */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/40 backdrop-blur-sm transition-opacity">
           <div className="absolute inset-0" onClick={closeModal}></div>
