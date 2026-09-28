@@ -49,9 +49,9 @@ const LiveClock = () => {
     return () => clearInterval(timer);
   }, []);
   return (
-    <h1 className="text-4xl font-black tracking-tighter drop-shadow-lg flex items-baseline justify-center">
+    <h1 className="text-4xl font-black tracking-tight drop-shadow-sm flex items-baseline justify-center">
       {format(time, "HH:mm")}
-      <span className="text-xl font-bold opacity-70 ml-1">
+      <span className="text-xl font-bold opacity-80 ml-1">
         :{format(time, "ss")}
       </span>
     </h1>
@@ -113,7 +113,7 @@ export default function Dashboard() {
         const todayStr = format(currentTime, "yyyy-MM-dd");
 
         const q = query(
-          collection(db, "attendances"),
+          collection(db, `schools/${user.school_id}/attendances`),
           where("user_id", "==", user.nip),
         );
         const snap = await getDocs(q);
@@ -231,7 +231,10 @@ export default function Dashboard() {
 
     if (successCount > 0) {
       toast.success(`${successCount} data absen offline terkirim!`);
-      const attData = await attendanceService.getTodayAttendance(user.nip);
+      const attData = await attendanceService.getTodayAttendance(
+        user.nip,
+        user.school_id,
+      );
       setTodayAtt(attData);
     }
   };
@@ -254,7 +257,6 @@ export default function Dashboard() {
     try {
       const timestampAsli = getSecureTime().toISOString();
       if (isOffline) {
-        // ... (Logika offline tetap sama) ...
         const attendancePayload = {
           id: Date.now().toString(),
           type: modalType,
@@ -301,9 +303,8 @@ export default function Dashboard() {
           if (result) setTodayAtt((prev) => ({ ...prev, ...result }));
         }
 
-        // TAMPILKAN MODAL SUKSES JIKA BERHASIL
         if (result) {
-          closeModal(); // Tutup modal konfirmasi
+          closeModal();
           setSuccessModal({
             isOpen: true,
             type: modalType,
@@ -330,9 +331,6 @@ export default function Dashboard() {
     return () => clearInterval(timer);
   }, []);
 
-  // ==========================================
-  // LOGIKA OVERRIDE DETEKSI IZIN/CUTI
-  // ==========================================
   const isAutoInject =
     todayAtt?.is_auto_injected === true ||
     todayAtt?.check_in?.time === "[AUTO-INJECT]";
@@ -341,7 +339,6 @@ export default function Dashboard() {
 
   let leaveLabel = "IZIN";
   if (isAutoInject && todayAtt?.status) {
-    // Mengubah "izin_kedinasan" menjadi "Izin Kedinasan"
     leaveLabel = todayAtt.status
       .split("_")
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -374,22 +371,17 @@ export default function Dashboard() {
     currentHM >= timeRules.check_out_start &&
     currentHM <= timeRules.check_out_end;
 
-  // LOGIKA TUTUP REAL-TIME BARU
-  // Datang ditutup jika lewat batas datangnya sendiri, ATAU jika batas pulang sudah lewat.
   const isDatangTutup =
     currentHM > timeRules.check_in_end || currentHM > timeRules.check_out_end;
-
-  // Pulang ditutup jika lewat batas akhirnya
   const isPulangTutup = currentHM > timeRules.check_out_end;
 
   const targetMinutes = 8 * 60;
   let workedMinutes = 0;
 
-  // OVERRIDE KALKULASI JAM UNTUK HARI IZIN/CUTI/SAKIT
   if (isLeaveZero) {
     workedMinutes = 0;
   } else if (isLeaveFull) {
-    workedMinutes = targetMinutes; // Paksa 8 Jam
+    workedMinutes = targetMinutes;
   } else if (hasCheckedIn) {
     const checkInDate = getValidTime(todayAtt.check_in.time);
     let endTime = calcTime;
@@ -410,7 +402,7 @@ export default function Dashboard() {
   const shortHours = Math.floor(shortfallMinutes / 60);
   const shortMins = shortfallMinutes % 60;
 
-  let shortText = "⚠️ Kurang ";
+  let shortText = "Kurang ";
   if (shortHours > 0) shortText += `${shortHours}j `;
   shortText += `${shortMins}m`;
 
@@ -425,7 +417,7 @@ export default function Dashboard() {
   const deficitHours = Math.floor(weeklyDeficitMinutes / 60);
   const deficitMins = Math.floor(weeklyDeficitMinutes % 60);
 
-  let weeklyBadgeText = "✅ Tercapai";
+  let weeklyBadgeText = "Tercapai";
   if (weeklyDeficitMinutes > 0) {
     weeklyBadgeText = `Kurang ${deficitHours}j ${deficitMins}m`;
   }
@@ -438,32 +430,36 @@ export default function Dashboard() {
     return "Selamat Malam";
   };
 
-  const circleRadius = 38;
-  const circleCircumference = 2 * Math.PI * circleRadius;
-  const strokeDashoffset =
-    circleCircumference - (progressPercent / 100) * circleCircumference;
-
   return (
-    <div className="min-h-screen bg-[#F4F6F9] pb-32 font-sans overflow-x-hidden">
-      <div className="bg-gradient-to-br from-indigo-500 via-primary to-violet-600 animate-gradient-bg text-white pt-12 pb-24 px-6 rounded-b-[3rem] shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3"></div>
-        <div className="absolute bottom-10 left-10 w-32 h-32 bg-white opacity-10 rounded-full blur-2xl"></div>
+    <div className="min-h-screen bg-[#F8FAFC] pb-32 font-sans overflow-x-hidden relative">
+      {/* BACKGROUND WATERMARK */}
+      {schoolData?.logo_url && (
+        <div className="fixed inset-0 z-0 pointer-events-none flex items-center justify-center overflow-hidden">
+          <img
+            src={schoolData.logo_url}
+            alt="Watermark"
+            className="w-[80vw] max-w-sm opacity-[0.08] object-contain "
+          />
+        </div>
+      )}
 
+      {/* HEADER SECTION */}
+      <div className="bg-gradient-to-b from-indigo-600 to-indigo-500 text-white pt-10 pb-20 px-6 rounded-b-[2rem] shadow-sm relative z-10">
         <div className="flex justify-between items-center relative z-10 mb-8">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md flex items-center justify-center border border-white/30 shadow-inner">
-              <UserIcon size={22} className="text-white drop-shadow-md" />
+            <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center border border-white/20">
+              <UserIcon size={20} className="text-white" />
             </div>
             <div>
-              <p className="text-xs text-indigo-100 font-semibold tracking-wide opacity-90">
+              <p className="text-[11px] text-indigo-200 font-medium tracking-wide">
                 {getGreeting()},
               </p>
-              <h2 className="text-base font-bold text-white tracking-wide">
-                {user?.name || "Guru"}
+              <h2 className="text-sm font-semibold text-white tracking-wide line-clamp-1">
+                {user?.name || "Pegawai"}
               </h2>
             </div>
           </div>
-          <div className="w-14 h-14 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center p-1.5 shadow-lg border border-white/20">
+          <div className="w-12 h-12 rounded-full flex items-center justify-center p-1 shadow-sm">
             {schoolData?.logo_url ? (
               <img
                 src={schoolData.logo_url}
@@ -471,221 +467,118 @@ export default function Dashboard() {
                 className="w-full h-full object-contain rounded-full"
               />
             ) : (
-              <School size={20} className="text-white" />
+              <School size={18} className="text-indigo-500" />
             )}
           </div>
         </div>
 
         <div className="relative z-10 text-center flex flex-col items-center">
-          <LiveClock />
-          <p className="text-sm text-indigo-100 mt-2 font-semibold tracking-wide bg-white/10 px-4 py-1.5 rounded-full backdrop-blur-sm border border-white/10">
+          <p className="text-xs text-indigo-100 mb-1 font-medium tracking-wide">
             {format(currentTime, "EEEE, dd MMMM yyyy", { locale: id })}
           </p>
+          <LiveClock />
         </div>
 
         {pendingSync > 0 && (
-          <div className="absolute top-6 right-6 bg-orange-500 text-white px-3 py-1.5 rounded-full text-[10px] font-bold shadow-lg flex items-center gap-1.5 animate-pulse z-20">
+          <div className="absolute top-4 right-1/2 translate-x-1/2 bg-orange-500 text-white px-3 py-1 rounded-full text-[10px] font-semibold shadow-md flex items-center gap-1.5 animate-pulse z-20">
             <RefreshCw size={12} className={isOffline ? "" : "animate-spin"} />
-            {pendingSync} Menunggu Sinyal
+            {pendingSync} Sync
           </div>
         )}
       </div>
 
-      <div className="-mt-14 mx-5 space-y-5 relative z-20">
-        <div
-          className="bg-white/80 backdrop-blur-2xl rounded-3xl shadow-xl shadow-indigo-900/10 p-1 border border-white animate-fade-in-up"
-          style={{ animationDelay: "0.1s" }}
-        >
-          <div className="bg-white rounded-[1.3rem] p-4 flex items-center justify-between">
+      <div className="-mt-12 mx-5 space-y-4 relative z-20">
+        {/* STATUS PANEL */}
+        <div className="bg-white/95 backdrop-blur-sm rounded-[1.5rem] shadow-sm border border-gray-100 p-4">
+          <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div
-                className={`relative w-12 h-12 rounded-full flex items-center justify-center shadow-inner ${
+                className={`relative w-10 h-10 rounded-full flex items-center justify-center ${
                   isInRadius
                     ? "bg-emerald-50 text-emerald-500"
                     : "bg-red-50 text-red-500"
                 }`}
               >
-                {isInRadius && (
-                  <div className="absolute inset-0 bg-emerald-400 rounded-full animate-ping opacity-20"></div>
-                )}
                 {gpsLoading ? (
-                  <Navigation size={22} className="animate-spin" />
+                  <Navigation size={18} className="animate-spin" />
                 ) : isInRadius ? (
-                  <MapPin size={22} />
+                  <MapPin size={18} />
                 ) : (
-                  <AlertCircle size={22} />
+                  <AlertCircle size={18} />
                 )}
               </div>
               <div>
-                <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">
-                  Status Lokasi
+                <h3 className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                  Lokasi
                 </h3>
-                <h3 className="text-sm font-black text-gray-800 line-clamp-1">
+                <h3 className="text-xs font-bold text-gray-800">
                   {gpsLoading
                     ? "Mencari GPS..."
                     : isInRadius
-                    ? "Dalam Area Sekolah"
+                    ? "Dalam Area"
                     : "Di Luar Area"}
                 </h3>
               </div>
             </div>
-            <div className="flex flex-col items-end gap-2">
+
+            <div className="flex flex-col items-end gap-1">
               <div
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold ${
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold ${
                   isInRadius
-                    ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/30"
-                    : "bg-red-100 text-red-600"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-red-100 text-red-700"
                 }`}
               >
-                {distance !== null ? `${distance} m` : "..."}
+                {distance !== null ? `${distance}m` : "--"}
               </div>
               <button
                 onClick={refreshLocation}
                 disabled={gpsLoading}
-                className="flex items-center gap-1 text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-1 rounded-lg border border-indigo-100 active:scale-95 disabled:opacity-50"
+                className="text-[10px] text-indigo-500 font-medium flex items-center gap-1 active:scale-95 disabled:opacity-50"
               >
                 <RefreshCw
-                  size={12}
+                  size={10}
                   className={gpsLoading ? "animate-spin" : ""}
                 />{" "}
-                Segarkan
+                Refresh
               </button>
             </div>
           </div>
-          <div className="px-5 py-3 border-t border-gray-100 flex justify-between items-center bg-gray-50/50 rounded-b-[1.3rem]">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+
+          <div className="pt-3 border-t border-gray-100 flex justify-between items-center">
+            <span className="text-[10px] font-medium text-gray-500">
               Jadwal Hari Ini
             </span>
             {isWorkingDay ? (
-              <span className="text-xs font-bold text-emerald-600 flex items-center gap-1.5">
-                <CalendarCheck size={14} /> Hari Kerja
+              <span className="text-[11px] font-semibold text-emerald-600 flex items-center gap-1">
+                <CalendarCheck size={12} /> Hari Kerja
               </span>
             ) : (
-              <span className="text-xs font-bold text-red-500 flex items-center gap-1.5 line-clamp-1">
-                <CalendarX size={14} /> Libur:{" "}
-                {holidayData?.description || "Akhir Pekan"}
+              <span className="text-[11px] font-semibold text-red-500 flex items-center gap-1">
+                <CalendarX size={12} /> Libur
               </span>
             )}
           </div>
         </div>
 
-        <div
-          className="bg-white rounded-3xl shadow-lg shadow-gray-200/50 p-5 border border-gray-100 flex items-center gap-6 animate-fade-in-up"
-          style={{ animationDelay: "0.2s" }}
-        >
-          <div className="relative w-24 h-24 flex-shrink-0 flex items-center justify-center">
-            <svg
-              className="w-full h-full transform -rotate-90"
-              viewBox="0 0 100 100"
-            >
-              <circle
-                cx="50"
-                cy="50"
-                r={circleRadius}
-                stroke="currentColor"
-                strokeWidth="10"
-                fill="transparent"
-                className="text-gray-100"
-              />
-              <circle
-                cx="50"
-                cy="50"
-                r={circleRadius}
-                stroke="currentColor"
-                strokeWidth="10"
-                fill="transparent"
-                strokeDasharray={circleCircumference}
-                strokeDashoffset={strokeDashoffset}
-                strokeLinecap="round"
-                className={`${
-                  isLeaveZero ? "text-red-500" : "text-emerald-500"
-                } transition-all duration-1000 ease-out drop-shadow-md`}
-              />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-lg font-black text-gray-800">
-                {Math.round(progressPercent)}%
-              </span>
-            </div>
-          </div>
-          <div className="flex-1">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-primary mb-1">
-              Target 8 Jam
-            </p>
-            <h3 className="text-2xl font-black text-gray-800 mb-1">
-              {hoursWorked} Jam{" "}
-              <span className="text-sm text-gray-500">{minsWorked} menit</span>
-            </h3>
-
-            <p
-              className={`text-xs font-medium ${
-                isLeaveZero
-                  ? "text-red-500 font-bold"
-                  : isLeaveFull
-                  ? "text-emerald-500 font-bold"
-                  : hasCheckedOut && progressPercent < 100
-                  ? "text-orange-500 font-bold"
-                  : "text-gray-400"
-              }`}
-            >
-              {isLeaveZero
-                ? "❌ Tidak Memenuhi (0 Jam)"
-                : isLeaveFull
-                ? "✅ Hadir Penuh (Izin Resmi)"
-                : hasCheckedOut
-                ? progressPercent >= 100
-                  ? "✅ Target Terpenuhi"
-                  : shortText
-                : hasCheckedIn
-                ? "Durasi berjalan..."
-                : "Belum absen masuk"}
-            </p>
-
-            <div className="mt-3 pt-3 border-t border-gray-100/80 flex items-center justify-between">
-              <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400">
-                Target {targetWeeklyHours} Jam
-              </span>
-              <span
-                className={`text-[10px] font-bold px-2 py-1 rounded-md transition-colors ${
-                  weeklyDeficitMinutes <= 0
-                    ? "bg-emerald-50 text-emerald-600"
-                    : "bg-orange-50 text-orange-600"
-                }`}
-              >
-                {weeklyBadgeText}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div
-          className="grid grid-cols-2 gap-4 animate-fade-in-up"
-          style={{ animationDelay: "0.3s" }}
-        >
-          {/* ==================================================== */}
-          {/* KOLOM 1: ABSEN MASUK */}
-          {/* ==================================================== */}
+        {/* ACTION PANELS */}
+        <div className="grid grid-cols-2 gap-4">
           <div className="flex flex-col gap-2">
-            {/* Label Rentang Waktu Masuk */}
             <div className="text-center">
-              <span className="bg-emerald-500 text-white text-[9px] font-bold px-3 py-1 rounded-full uppercase tracking-widest border border-gray-200">
+              <span className="bg-emerald-200/90 backdrop-blur-sm text-gray-800 text-[10px] font-medium px-3 py-1 rounded-full shadow-sm border border-white">
                 {timeRules.check_in_start} - {timeRules.check_in_end}
               </span>
             </div>
-
-            <div className="bg-white rounded-3xl shadow-lg shadow-gray-200/50 p-5 border border-gray-100 relative overflow-hidden group h-full">
-              <div className="absolute -right-4 -bottom-4 bg-emerald-50 w-24 h-24 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
-              <div className="flex items-center gap-2 text-gray-400 mb-2 relative z-10">
-                <div className="p-1.5 bg-gray-50 rounded-lg">
-                  <LogIn size={14} className="text-emerald-500" />
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider">
-                  Absen Masuk
-                </span>
+            <div className="bg-white/95 backdrop-blur-sm rounded-[1.5rem] shadow-sm border border-gray-100 p-4 flex flex-col items-center justify-center">
+              <div className="p-2 bg-emerald-50 rounded-full mb-2">
+                <LogIn size={18} className="text-emerald-500" />
               </div>
-              <p className="text-3xl font-black text-gray-800 relative z-10">
+              <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                Masuk
+              </span>
+              <p className="text-2xl font-bold text-gray-800">
                 {isAutoInject ? (
-                  <span className="text-xl text-emerald-600 font-bold">
+                  <span className="text-base text-emerald-600">
                     {leaveLabel}
                   </span>
                 ) : hasCheckedIn ? (
@@ -702,30 +595,22 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* ==================================================== */}
-          {/* KOLOM 2: ABSEN PULANG */}
-          {/* ==================================================== */}
           <div className="flex flex-col gap-2">
-            {/* Label Rentang Waktu Pulang */}
             <div className="text-center">
-              <span className="bg-red-500 text-white text-[9px] font-bold px-3 py-1 rounded-full uppercase tracking-widest border border-gray-200">
+              <span className="bg-red-300/90 backdrop-blur-sm text-gray-800 text-[10px] font-medium px-3 py-1 rounded-full shadow-sm border border-white">
                 {timeRules.check_out_start} - {timeRules.check_out_end}
               </span>
             </div>
-
-            <div className="bg-white rounded-3xl shadow-lg shadow-gray-200/50 p-5 border border-gray-100 relative overflow-hidden group h-full">
-              <div className="absolute -right-4 -bottom-4 bg-red-50 w-24 h-24 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
-              <div className="flex items-center gap-2 text-gray-400 mb-2 relative z-10">
-                <div className="p-1.5 bg-gray-50 rounded-lg">
-                  <LogOut size={14} className="text-red-500" />
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-wider">
-                  Absen Pulang
-                </span>
+            <div className="bg-white/95 backdrop-blur-sm rounded-[1.5rem] shadow-sm border border-gray-100 p-4 flex flex-col items-center justify-center">
+              <div className="p-2 bg-red-50 rounded-full mb-2">
+                <LogOut size={18} className="text-red-500" />
               </div>
-              <p className="text-3xl font-black text-gray-800 relative z-10">
+              <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                Pulang
+              </span>
+              <p className="text-2xl font-bold text-gray-800">
                 {isAutoInject ? (
-                  <span className="text-xl text-emerald-600 font-bold">
+                  <span className="text-base text-emerald-600">
                     {leaveLabel}
                   </span>
                 ) : hasCheckedOut ? (
@@ -742,47 +627,100 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+        {/* LINEAR PROGRESS PANEL */}
+        <div className="bg-white/95 backdrop-blur-sm rounded-[1.5rem] shadow-sm border border-gray-100 p-5 flex flex-col gap-4">
+          <div className="flex justify-between items-end">
+            <div>
+              <h3 className="text-md font-bold text-gray-800">
+                {hoursWorked} Jam{" "}
+                <span className="text-xs font-medium text-gray-500">
+                  {minsWorked} menit
+                </span>
+              </h3>
+              <p
+                className={`text-[11px] font-medium ${
+                  isLeaveZero
+                    ? "text-red-500"
+                    : isLeaveFull
+                    ? "text-emerald-500"
+                    : hasCheckedOut && progressPercent < 100
+                    ? "text-orange-500"
+                    : "text-gray-500"
+                }`}
+              >
+                {isLeaveZero
+                  ? "Bebas Tugas (0 Jam)"
+                  : isLeaveFull
+                  ? "Hadir Penuh (Izin)"
+                  : hasCheckedOut
+                  ? progressPercent >= 100
+                    ? "Target Harian Terpenuhi"
+                    : `⚠️ ${shortText}`
+                  : hasCheckedIn
+                  ? "Durasi sedang berjalan..."
+                  : "Belum mulai absen"}
+              </p>
+            </div>
+            <div className="text-right">
+              <span className="text-md font-bold text-gray-800">
+                {Math.round(progressPercent)}%
+              </span>
+              <p className="text-[10px] font-medium text-gray-400">Target 8 Jam</p>
+            </div>
+          </div>
+
+          {/* Progress Bar Container */}
+          <div className="w-full bg-gray-100 rounded-full h-3.5 overflow-hidden shadow-inner">
+            <div
+              className={`h-full rounded-full transition-all duration-1000 ease-out ${
+                isLeaveZero ? "bg-red-500" : "bg-indigo-500"
+              }`}
+              style={{ width: `${progressPercent}%` }}
+            ></div>
+          </div>
+
+          <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
+            <span className="text-[10px] font-medium text-gray-400">
+              Mingguan ({targetWeeklyHours} Jam)
+            </span>
+            <span
+              className={`text-[9px] font-semibold px-2 py-0.5 rounded transition-colors ${
+                weeklyDeficitMinutes <= 0
+                  ? "bg-emerald-50 text-emerald-600"
+                  : "bg-orange-50 text-orange-600"
+              }`}
+            >
+              {weeklyBadgeText}
+            </span>
+          </div>
+        </div>
       </div>
 
-      <div
-        className="fixed bottom-24 left-0 w-full px-5 z-40 animate-fade-in-up"
-        style={{ animationDelay: "0.4s" }}
-      >
+      {/* FLOATING ACTION BAR */}
+      <div className="fixed bottom-[80px] left-0 w-full px-5 z-40">
         {isTimeManipulated ? (
-          <div className="bg-white/95 backdrop-blur-xl p-6 rounded-[2rem] shadow-[0_20px_40px_-15px_rgba(220,38,38,0.3)] border-2 border-red-100 flex flex-col items-center text-center animate-pulse">
-            <div className="w-14 h-14 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-3">
-              <Clock size={28} />
-            </div>
-            <h3 className="font-black text-gray-800 text-lg mb-1">
-              Manipulasi Jam Terdeteksi!
+          <div className="bg-white/95 backdrop-blur p-4 rounded-[1.5rem] shadow-lg border border-red-100 flex flex-col items-center text-center">
+            <Clock size={24} className="text-red-500 mb-2" />
+            <h3 className="font-bold text-gray-800 text-sm mb-1">
+              Waktu Tidak Sinkron
             </h3>
-            <p className="text-xs text-gray-500 font-medium">
-              Waktu pada perangkat Anda tidak sinkron dengan server. Harap
-              aktifkan{" "}
-              <strong className="text-red-500">"Waktu Otomatis"</strong> di
-              Pengaturan HP Anda.
+            <p className="text-[10px] text-gray-500">
+              Aktifkan "Waktu Otomatis" di pengaturan perangkat.
             </p>
           </div>
         ) : isLeaveZero || isLeaveFull ? (
-          <div className="bg-white/95 backdrop-blur-xl p-5 rounded-[2rem] shadow-xl border border-orange-100 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center shadow-inner">
-                <CalendarCheck size={24} />
-              </div>
-              <div>
-                <h3 className="font-black text-gray-800 text-base mb-0.5">
-                  Status: {leaveLabel}
-                </h3>
-                <p className="text-[10px] text-gray-500 font-medium tracking-wide">
-                  {isLeaveZero
-                    ? "Bebas tugas absensi hari ini."
-                    : "Dianggap hadir penuh hari ini."}
-                </p>
-              </div>
+          <div className="bg-white/95 backdrop-blur p-4 rounded-[1.5rem] shadow-md border border-orange-100 flex items-center gap-3">
+            <div className="w-10 h-10 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center shrink-0">
+              <CalendarCheck size={20} />
+            </div>
+            <div>
+              <h3 className="font-bold text-gray-800 text-sm">{leaveLabel}</h3>
+              <p className="text-[10px] text-gray-500">Tercatat pada sistem.</p>
             </div>
           </div>
         ) : (
-          <div className="bg-white/70 backdrop-blur-2xl p-2.5 rounded-[2rem] shadow-[0_20px_40px_-15px_rgba(0,0,0,0.1)] border border-white flex gap-3">
+          <div className="bg-white/80 backdrop-blur-xl p-2 rounded-[1.5rem] shadow-lg border border-gray-100 flex gap-2">
             <button
               onClick={() => openModal("datang")}
               disabled={
@@ -793,34 +731,34 @@ export default function Dashboard() {
                 !isWorkingDay ||
                 isDatangTutup
               }
-              className={`flex-1 py-4 rounded-[1.5rem] transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden ${
+              className={`flex-1 py-3.5 rounded-xl font-semibold text-sm transition-all ${
                 hasCheckedIn ||
                 (!isCheckInTimeValid && !hasCheckedIn) ||
                 !isInRadius ||
                 !isWorkingDay ||
                 isDatangTutup
-                  ? "bg-gray-100 text-gray-400 opacity-90"
-                  : "bg-emerald-500 text-white shadow-lg shadow-emerald-500/40 btn-active-pulse"
+                  ? "bg-gray-100 text-gray-400"
+                  : "bg-emerald-500 text-white shadow-md active:scale-95"
               }`}
             >
-              <span className="font-bold text-sm tracking-wide">
+              <span className="flex flex-col items-center">
                 {!isWorkingDay
                   ? "Libur"
                   : isDatangTutup
-                  ? "Absen Tutup"
+                  ? "Sesi Masuk Ditutup"
                   : hasCheckedIn
-                  ? "Sudah Absen"
-                  : "Absen Datang"}
+                  ? "Sudah Masuk"
+                  : "Absen Masuk"}
+
+                {!hasCheckedIn &&
+                  isWorkingDay &&
+                  !isDatangTutup &&
+                  !isCheckInTimeValid && (
+                    <span className="text-[9px] uppercase font-bold text-red-400 mt-0.5">
+                      Luar Jam
+                    </span>
+                  )}
               </span>
-              {/* Keterangan "Luar Jam" muncul jika belum absen, belum tutup, hari kerja, tapi di luar rentang */}
-              {!hasCheckedIn &&
-                isWorkingDay &&
-                !isDatangTutup &&
-                !isCheckInTimeValid && (
-                  <span className="text-[9px] uppercase font-bold tracking-widest text-red-400">
-                    Luar Jam
-                  </span>
-                )}
             </button>
 
             <button
@@ -833,79 +771,73 @@ export default function Dashboard() {
                 !isWorkingDay ||
                 isPulangTutup
               }
-              className={`flex-1 py-4 rounded-[1.5rem] transition-all active:scale-95 flex flex-col items-center justify-center gap-1 relative overflow-hidden ${
+              className={`flex-1 py-3.5 rounded-xl font-semibold text-sm transition-all ${
                 !hasCheckedIn ||
                 hasCheckedOut ||
                 (!isCheckOutTimeValid && hasCheckedIn && !hasCheckedOut) ||
                 !isInRadius ||
                 !isWorkingDay ||
                 isPulangTutup
-                  ? "bg-gray-100 text-gray-400 opacity-90"
-                  : "bg-red-500 text-white shadow-lg shadow-red-500/40 btn-active-pulse"
+                  ? "bg-gray-100 text-gray-400"
+                  : "bg-red-500 text-white shadow-md active:scale-95"
               }`}
             >
-              <span className="font-bold text-sm tracking-wide">
+              <span className="flex flex-col items-center">
                 {!isWorkingDay
                   ? "Libur"
                   : isPulangTutup
-                  ? "Absen Tutup"
+                  ? "Sesi Pulang Ditutup"
                   : hasCheckedOut
-                  ? "Sudah Absen"
+                  ? "Sudah Pulang"
                   : "Absen Pulang"}
+
+                {hasCheckedIn &&
+                  !hasCheckedOut &&
+                  isWorkingDay &&
+                  !isPulangTutup &&
+                  !isCheckOutTimeValid && (
+                    <span className="text-[9px] uppercase font-bold text-red-400 mt-0.5">
+                      Luar Jam
+                    </span>
+                  )}
               </span>
-              {/* Keterangan "Luar Jam" muncul jika sudah absen datang, belum pulang, belum tutup, tapi di luar rentang */}
-              {hasCheckedIn &&
-                !hasCheckedOut &&
-                isWorkingDay &&
-                !isPulangTutup &&
-                !isCheckOutTimeValid && (
-                  <span className="text-[9px] uppercase font-bold tracking-widest text-red-400">
-                    Luar Jam
-                  </span>
-                )}
             </button>
           </div>
         )}
       </div>
 
+      {/* CONFIRMATION MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/40 backdrop-blur-sm transition-opacity">
           <div className="absolute inset-0" onClick={closeModal}></div>
-          <div className="bg-white rounded-t-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden animate-[slideUp_0.3s_ease-out] relative z-10 pb-24 pt-3">
-            <div className="w-16 h-1.5 bg-gray-200 rounded-full mx-auto my-2"></div>
-            <div className="px-6 py-4 flex justify-between items-center mb-2 border-b border-gray-50">
+          <div className="bg-white rounded-t-[2rem] w-full max-w-md overflow-hidden relative z-10 pb-8 pt-2 animate-[slideUp_0.3s_ease-out]">
+            <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto my-3"></div>
+            <div className="px-5 py-2 flex justify-between items-center mb-4">
               <div>
-                <h3 className="text-lg font-black text-gray-800 tracking-tight">
+                <h3 className="text-lg font-bold text-gray-800">
                   Konfirmasi {modalType === "datang" ? "Masuk" : "Pulang"}
                 </h3>
-                <p className="text-xs text-gray-400 font-semibold mt-0.5">
-                  Pastikan lokasi Anda sudah akurat.
+                <p className="text-[11px] text-gray-500 font-medium">
+                  Pastikan lokasi presisi.
                 </p>
               </div>
               <button
                 onClick={closeModal}
                 disabled={isSaving}
-                className="p-2 rounded-full bg-gray-50 text-gray-500 hover:bg-gray-200 transition-colors disabled:opacity-50"
+                className="p-1.5 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 disabled:opacity-50"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
-            <div className="px-6 space-y-4 mt-4">
-              <div className="h-[200px] w-full bg-slate-100 rounded-[2rem] overflow-hidden relative border-4 border-white mb-4 shadow-inner">
+
+            <div className="px-5 space-y-4">
+              <div className="h-[180px] w-full bg-gray-100 rounded-[1.5rem] overflow-hidden relative border-2 border-white shadow-inner">
                 {latitude &&
                 longitude &&
                 schoolData?.latitude &&
                 schoolData?.longitude &&
                 isMapReady ? (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                    }}
-                  >
+                  <div className="absolute inset-0">
                     <RadiusMap
                       key={`map-${latitude}-${longitude}-${isModalOpen}`}
                       userLat={latitude}
@@ -916,57 +848,59 @@ export default function Dashboard() {
                     />
                   </div>
                 ) : (
-                  <div className="absolute inset-0 flex items-center justify-center flex-col gap-2 bg-slate-50 z-10">
-                    <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-gray-400 text-[10px] font-bold animate-pulse">
-                      {!isMapReady ? "Menyesuaikan Peta..." : "Mencari GPS..."}
+                  <div className="absolute inset-0 flex items-center justify-center flex-col gap-2 bg-slate-50">
+                    <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-[10px] text-gray-400 font-medium">
+                      Mencari lokasi...
                     </span>
                   </div>
                 )}
               </div>
+
               <div
-                className={`p-4 rounded-[1.5rem] flex items-center justify-center gap-3 border ${
+                className={`p-3 rounded-xl flex items-center justify-center gap-2 border text-sm font-semibold ${
                   isInRadius
                     ? "bg-emerald-50 border-emerald-100 text-emerald-600"
                     : "bg-red-50 border-red-100 text-red-600"
                 }`}
               >
                 {isInRadius ? (
-                  <CheckCircle size={22} />
+                  <CheckCircle size={18} />
                 ) : (
-                  <AlertCircle size={22} />
+                  <AlertCircle size={18} />
                 )}
-                <span className="font-bold text-sm uppercase tracking-wide">
+                <span>
                   {isInRadius
-                    ? `Lokasi Valid (${distance}m)`
-                    : `Di Luar Area (${distance}m)`}
+                    ? `Lokasi Sesuai (${distance}m)`
+                    : `Di Luar Radius (${distance}m)`}
                 </span>
               </div>
             </div>
-            <div className="p-6 pt-2 flex gap-3">
+
+            <div className="p-5 flex gap-3">
               <button
                 onClick={closeModal}
                 disabled={isSaving}
-                className="flex-1 py-3.5 rounded-2xl font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-50"
+                className="flex-1 py-3 rounded-xl font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 disabled:opacity-50"
               >
                 Batal
               </button>
               <button
                 onClick={handleSaveAttendance}
                 disabled={!isInRadius || isSaving}
-                className={`flex-1 py-3.5 rounded-2xl font-bold text-white flex items-center justify-center gap-2 transition-all shadow-lg ${
+                className={`flex-1 py-3 rounded-xl font-semibold text-white flex items-center justify-center gap-2 ${
                   isSaving
-                    ? "bg-gray-400 cursor-not-allowed opacity-80"
-                    : "bg-emerald-500 hover:bg-emerald-600 shadow-primary/30"
+                    ? "bg-gray-400 opacity-80"
+                    : "bg-indigo-600 hover:bg-indigo-700 active:scale-95"
                 }`}
               >
                 {isSaving ? (
                   <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Menyimpan...
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Menyimpan
                   </>
                 ) : (
-                  "Kirim Absen"
+                  "Konfirmasi"
                 )}
               </button>
             </div>
@@ -974,46 +908,37 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ==================================================== */}
-      {/* MODAL SUKSES ABSEN */}
-      {/* ==================================================== */}
+      {/* SUCCESS MODAL */}
       {successModal.isOpen && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm transition-opacity px-5">
-          <div
-            className="absolute inset-0"
-            onClick={() =>
-              setSuccessModal({ isOpen: false, type: "", time: "" })
-            }
-          ></div>
-          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden animate-fade-in-up relative z-10 p-8 flex flex-col items-center text-center border-4 border-emerald-50">
-            <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-5 shadow-inner">
-              <CheckCircle size={50} className="text-emerald-500" />
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm px-5">
+          <div className="bg-white rounded-[2rem] w-full max-w-xs overflow-hidden relative z-10 p-6 flex flex-col items-center text-center animate-[scaleIn_0.2s_ease-out]">
+            <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mb-4">
+              <CheckCircle size={36} className="text-emerald-500" />
             </div>
 
-            <h3 className="text-xl font-black text-gray-800 mb-1 tracking-tight">
-              Berhasil Absen{" "}
-              {successModal.type === "datang" ? "Datang" : "Pulang"}
+            <h3 className="text-lg font-bold text-gray-800 mb-1">
+              Berhasil {successModal.type === "datang" ? "Masuk" : "Pulang"}
             </h3>
 
-            <div className="bg-gray-50 px-6 py-2 rounded-xl border border-gray-100 my-3">
-              <p className="text-3xl font-black text-emerald-600 tracking-wider">
+            <div className="bg-gray-50 px-5 py-2 rounded-lg mb-4 mt-2 border border-gray-100">
+              <p className="text-2xl font-black text-emerald-600">
                 {successModal.time}
               </p>
             </div>
 
-            <p className="text-sm font-bold text-gray-500 mb-8 mt-1">
+            <p className="text-xs text-gray-500 mb-6">
               {successModal.type === "datang"
-                ? "Selamat Bekerja!"
-                : "Terima kasih, Selamat Beristirahat!"}
+                ? "Selamat bekerja hari ini."
+                : "Terima kasih atas kerja keras Anda."}
             </p>
 
             <button
               onClick={() =>
                 setSuccessModal({ isOpen: false, type: "", time: "" })
               }
-              className="w-full py-4 rounded-2xl font-black text-white bg-emerald-500 hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-500/40 active:scale-95"
+              className="w-full py-3 rounded-xl font-semibold text-white bg-emerald-500 hover:bg-emerald-600 active:scale-95"
             >
-              Tutup
+              Selesai
             </button>
           </div>
         </div>

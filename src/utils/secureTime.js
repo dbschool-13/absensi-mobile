@@ -3,12 +3,14 @@ let isSynced = false;
 let serverValidated = false;
 let isSyncing = false;
 
+// Penanda waktu inisialisasi aplikasi untuk mencegah false positive saat cold start
+const appLoadTime = Date.now();
+
 // ==========================================
 // FUNGSI PENCARI WAKTU DUAL-SERVER
 // ==========================================
 const fetchNetworkTime = async () => {
   try {
-    // SERVER 1 UTAMA KINI TIMEAPI (Lebih Kuat & Stabil)
     const res1 = await fetch(
       `https://timeapi.io/api/Time/current/zone?timeZone=UTC&nocache=${Date.now()}`,
       { cache: "no-store" },
@@ -19,7 +21,6 @@ const fetchNetworkTime = async () => {
     }
     throw new Error("Server 1 gagal");
   } catch (error) {
-    // SERVER 2 CADANGAN WORLDTIMEAPI
     const res2 = await fetch(
       `https://worldtimeapi.org/api/timezone/Etc/UTC?nocache=${Date.now()}`,
       { cache: "no-store" },
@@ -43,12 +44,12 @@ export const syncServerTime = async () => {
     timeOffset = serverTime - localTime;
     isSynced = true;
 
-    // LAPIS 1: HAKIM ONLINE (Toleransi 5 Menit)
+    // Toleransi online 5 menit (300000 ms)
     if (Math.abs(timeOffset) > 300000) {
       localStorage.setItem("is_time_manipulated", "true");
       serverValidated = false;
     } else {
-      // JAM TERBUKTI BENAR! HAPUS KUNCI SECARA PAKSA
+      // Waktu valid, hapus kunci manipulasi secara paksa (Self-Healing)
       localStorage.removeItem("is_time_manipulated");
       serverValidated = true;
       localStorage.setItem("last_valid_time", localTime.toString());
@@ -70,10 +71,12 @@ export const getSecureTime = () => {
     lastSavedTime &&
     currentLocalTime < parseInt(lastSavedTime)
   ) {
-    localStorage.setItem("is_time_manipulated", "true");
+    // Berikan toleransi kecil 5 detik untuk mengantisipasi selisih mikro
+    if (parseInt(lastSavedTime) - currentLocalTime > 5000) {
+      localStorage.setItem("is_time_manipulated", "true");
+    }
   }
 
-  // Hanya rekam jejak waktu tertinggi JIKA TIDAK SEDANG DIMANIPULASI
   if (localStorage.getItem("is_time_manipulated") !== "true") {
     if (
       !lastSavedTime ||
@@ -99,19 +102,20 @@ if (typeof window !== "undefined") {
   let lastPerf = performance.now();
 
   const checkDrift = () => {
+    // ABAIKAN pengecekan selama 5 detik pertama setelah aplikasi dimuat (Cold Start Protection)
+    if (Date.now() - appLoadTime < 5000) return;
+
     const currentTick = Date.now();
     const currentPerf = performance.now();
 
     const tickDelta = currentTick - lastTick;
     const perfDelta = currentPerf - lastPerf;
 
-    // Jika beda waktu antara jam sistem kalender dan mesin HP melebihi 3 detik.
-    if (Math.abs(tickDelta - perfDelta) > 3000) {
-      // INI KUNCI UTAMANYA: LANGSUNG KUNCI APLIKASI (MERAH) TANPA TUNGGU SERVER!
+    // Batas toleransi dinaikkan dari 3 detik ke 8 detik untuk mencegah false positive
+    if (Math.abs(tickDelta - perfDelta) > 8000) {
       localStorage.setItem("is_time_manipulated", "true");
       serverValidated = false;
 
-      // Paksa sinkronisasi HANYA JIKA online. Jika offline, layar tetap terkunci.
       if (navigator.onLine) {
         syncServerTime();
       }
@@ -121,19 +125,24 @@ if (typeof window !== "undefined") {
     lastPerf = currentPerf;
   };
 
-  // A. Deteksi saat aplikasi dibuka dari Background (Setelah ubah Pengaturan HP)
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-      checkDrift(); // Cek loncatan seketika
+      // Reset acuan waktu saat aplikasi dibuka kembali dari background untuk cegah loncatan palsu
+      lastTick = Date.now();
+      lastPerf = performance.now();
+
       if (navigator.onLine) syncServerTime();
     }
   });
 
-  // B. Deteksi instan saat jaringan HP kembali menyala dari Airplane Mode
   window.addEventListener("online", () => {
     syncServerTime();
   });
 
-  // C. Pemantauan berdetak setiap 1 detik
+  // Jalankan sinkronisasi awal saat skrip dimuat jika ada koneksi
+  if (navigator.onLine) {
+    syncServerTime();
+  }
+
   setInterval(checkDrift, 1000);
 }
