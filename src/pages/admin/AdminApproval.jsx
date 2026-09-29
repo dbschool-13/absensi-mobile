@@ -39,9 +39,6 @@ export default function AdminApproval() {
       setTeachers(teachersData);
     });
 
-    // ========================================================
-    // ✅ PERBAIKAN KRUSIAL: Pindah ke Sub-Koleksi Sekolah
-    // ========================================================
     const q = query(collection(db, `schools/${user.school_id}/leave_requests`));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -69,10 +66,11 @@ export default function AdminApproval() {
   }, [user]);
 
   const handleApprove = async (requestData) => {
+    // PERBAIKAN: Menampilkan rentang tanggal yang utuh pada pop-up konfirmasi
     const isConfirm = window.confirm(
       `Setujui pengajuan ${requestData.type.replace("_", " ")} untuk tanggal ${
         requestData.start_date
-      }? (Sistem akan membuat absen otomatis)`,
+      } s/d ${requestData.end_date}? (Sistem akan membuat absen otomatis)`,
     );
     if (!isConfirm) return;
 
@@ -96,7 +94,6 @@ export default function AdminApproval() {
     setIsProcessing(true);
     const toastId = toast.loading("Menolak pengajuan...");
 
-    // ✅ PERBAIKAN: Tambahkan user.school_id agar service tahu kamar mana yang ditolak
     const success = await leaveService.rejectLeaveRequest(
       requestId,
       user.school_id,
