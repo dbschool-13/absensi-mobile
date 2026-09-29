@@ -431,7 +431,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] pb-32 font-sans overflow-x-hidden relative">
+    <div className="min-h-screen bg-[#F8FAFC] pb-30 font-sans overflow-x-hidden relative">
       {/* BACKGROUND WATERMARK */}
       {schoolData?.logo_url && (
         <div className="fixed inset-0 z-0 pointer-events-none flex items-center justify-center overflow-hidden">
@@ -444,8 +444,8 @@ export default function Dashboard() {
       )}
 
       {/* HEADER SECTION */}
-      <div className="bg-gradient-to-b from-indigo-600 to-indigo-500 text-white pt-10 pb-20 px-6 rounded-b-[2rem] shadow-sm relative z-10">
-        <div className="flex justify-between items-center relative z-10 mb-8">
+      <div className="bg-gradient-to-b from-primary to-primary_dark text-white pt-10 pb-20 px-6 rounded-b-[2rem] shadow-sm relative z-10">
+        <div className="flex justify-between items-center relative z-10 mb-6">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center border border-white/20">
               <UserIcon size={20} className="text-white" />
@@ -459,7 +459,7 @@ export default function Dashboard() {
               </h2>
             </div>
           </div>
-          <div className="w-12 h-12 rounded-full flex items-center justify-center p-1 shadow-sm">
+          <div className="w-14 h-14 rounded-full flex items-center justify-center p-1 shadow-sm">
             {schoolData?.logo_url ? (
               <img
                 src={schoolData.logo_url}
@@ -489,7 +489,7 @@ export default function Dashboard() {
 
       <div className="-mt-12 mx-5 space-y-4 relative z-20">
         {/* STATUS PANEL */}
-        <div className="bg-white/95 backdrop-blur-sm rounded-[1.5rem] shadow-sm border border-gray-100 p-4">
+        <div className="bg-white/95 backdrop-blur-sm rounded-[1.5rem] opacity-[12] shadow-sm border border-gray-100 p-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <div
@@ -569,7 +569,7 @@ export default function Dashboard() {
                 {timeRules.check_in_start} - {timeRules.check_in_end}
               </span>
             </div>
-            <div className="bg-white/95 backdrop-blur-sm rounded-[1.5rem] shadow-sm border border-gray-100 p-4 flex flex-col items-center justify-center">
+            <div className="bg-white/95 backdrop-blur-sm rounded-[1.5rem] shadow-sm border border-gray-100 p-4 flex flex-col items-center justify-center opacity-[0.8]">
               <div className="p-2 bg-emerald-50 rounded-full mb-2">
                 <LogIn size={18} className="text-emerald-500" />
               </div>
@@ -601,7 +601,7 @@ export default function Dashboard() {
                 {timeRules.check_out_start} - {timeRules.check_out_end}
               </span>
             </div>
-            <div className="bg-white/95 backdrop-blur-sm rounded-[1.5rem] shadow-sm border border-gray-100 p-4 flex flex-col items-center justify-center">
+            <div className="bg-white/95 backdrop-blur-sm rounded-[1.5rem] shadow-sm border border-gray-100 p-4 flex flex-col items-center justify-center opacity-[0.8]">
               <div className="p-2 bg-red-50 rounded-full mb-2">
                 <LogOut size={18} className="text-red-500" />
               </div>
@@ -810,7 +810,7 @@ export default function Dashboard() {
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/40 backdrop-blur-sm transition-opacity">
           <div className="absolute inset-0" onClick={closeModal}></div>
-          <div className="bg-white rounded-t-[2rem] w-full max-w-md overflow-hidden relative z-10 pb-8 pt-2 animate-[slideUp_0.3s_ease-out]">
+          <div className="bg-white rounded-t-[2rem] w-full max-w-md overflow-hidden relative z-10 pb-20 pt-2 animate-[slideUp_0.3s_ease-out]">
             <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto my-3"></div>
             <div className="px-5 py-2 flex justify-between items-center mb-4">
               <div>
@@ -891,7 +891,7 @@ export default function Dashboard() {
                 className={`flex-1 py-3 rounded-xl font-semibold text-white flex items-center justify-center gap-2 ${
                   isSaving
                     ? "bg-gray-400 opacity-80"
-                    : "bg-indigo-600 hover:bg-indigo-700 active:scale-95"
+                    : "bg-emerald-500 hover:bg-indigo-700 active:scale-95"
                 }`}
               >
                 {isSaving ? (
@@ -917,7 +917,7 @@ export default function Dashboard() {
             </div>
 
             <h3 className="text-lg font-bold text-gray-800 mb-1">
-              Berhasil {successModal.type === "datang" ? "Masuk" : "Pulang"}
+              Berhasil {successModal.type === "datang" ? "Absen Masuk" : "Absen Pulang"}
             </h3>
 
             <div className="bg-gray-50 px-5 py-2 rounded-lg mb-4 mt-2 border border-gray-100">
@@ -928,8 +928,8 @@ export default function Dashboard() {
 
             <p className="text-xs text-gray-500 mb-6">
               {successModal.type === "datang"
-                ? "Selamat bekerja hari ini."
-                : "Terima kasih atas kerja keras Anda."}
+                ? "Selamat Bekerja Hari ini."
+                : "Terima Kasih. Selamat Beristirahat."}
             </p>
 
             <button

@@ -58,7 +58,7 @@ export default function Profil() {
   return (
     <div className="min-h-screen bg-gray-50 pb-24 font-sans">
       {/* 1. HEADER SECTION */}
-      <div className="bg-gradient-to-b from-primary to-primary_dark text-white pt-12 pb-24 px-6 rounded-b-[2.5rem] shadow-lg relative overflow-hidden flex flex-col items-center">
+      <div className="bg-gradient-to-b from-primary to-primary_dark text-white pt-12 pb-20 px-6 rounded-b-[2.5rem] shadow-lg relative overflow-hidden flex flex-col items-center">
         <div className="absolute top-0 right-0 w-40 h-40 bg-white opacity-5 rounded-full blur-2xl"></div>
         <div className="absolute bottom-10 left-10 w-32 h-32 bg-white opacity-10 rounded-full blur-xl"></div>
 
@@ -159,7 +159,7 @@ export default function Profil() {
       </div>
 
       {/* 3. LOGOUT BUTTON */}
-      <div className="px-5 mt-8">
+      <div className="px-5 mt-5">
         <button
           onClick={() => setIsLogoutModalOpen(true)}
           className="w-full bg-red-50 text-red-600 hover:bg-red-100 active:scale-95 transition-all py-4 rounded-2xl font-bold flex items-center justify-center gap-2 border border-red-100 shadow-sm"
