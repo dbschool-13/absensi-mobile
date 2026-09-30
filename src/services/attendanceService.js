@@ -9,6 +9,7 @@ import {
   setDoc,
   updateDoc,
   serverTimestamp,
+  writeBatch, // <-- WAJIB DITAMBAHKAN
 } from "firebase/firestore";
 import { getTodayString, calculateWorkHours } from "../utils/timeUtils";
 import toast from "react-hot-toast";
@@ -86,7 +87,6 @@ export const attendanceService = {
       const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
 
       const docId = `${userId}_${trueDateStr}`;
-      // PERUBAHAN PATH SUB-KOLEKSI
       const docRef = doc(db, `schools/${schoolId}/attendances`, docId);
 
       const payload = {
@@ -108,7 +108,6 @@ export const attendanceService = {
       };
 
       await setDoc(docRef, payload, { merge: true });
-      // if (!isOfflineSync) toast.success("Berhasil Absen Datang!");
       return payload;
     } catch (error) {
       console.error("CheckIn error:", error);
@@ -120,7 +119,7 @@ export const attendanceService = {
   // 3. Proses Absen Pulang
   checkOut: async (
     userId,
-    schoolId, // DITAMBAHKAN SCHOOL ID SEBAGAI PARAMETER KEDUA
+    schoolId,
     latitude,
     longitude,
     distance,
@@ -139,13 +138,12 @@ export const attendanceService = {
       const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
 
       const docId = `${userId}_${trueDateStr}`;
-      // PERUBAHAN PATH SUB-KOLEKSI
       const docRef = doc(db, `schools/${schoolId}/attendances`, docId);
 
       // Pengaman kebal string [AUTO-INJECT] di level service
       let checkInDate;
       if (checkInTime === "[AUTO-INJECT]") {
-        checkInDate = absoluteDateObj; // Fallback agar tidak NaN
+        checkInDate = absoluteDateObj;
       } else {
         checkInDate = checkInTime?.toDate
           ? checkInTime.toDate()
@@ -169,7 +167,6 @@ export const attendanceService = {
       };
 
       await updateDoc(docRef, payloadUpdate);
-      // if (!isOfflineSync) toast.success("Berhasil Absen Pulang!");
       return payloadUpdate;
     } catch (error) {
       console.error("CheckOut error:", error);
@@ -178,31 +175,108 @@ export const attendanceService = {
     }
   },
 
-  // 4. Ambil Riwayat Absen (DITAMBAH SCHOOL ID)
+  // 4. Ambil Riwayat Absen (OPTIMALISASI KUOTA)
   getHistory: async (userId, schoolId, month, year) => {
     if (!schoolId) return [];
     try {
-      // PERUBAHAN PATH SUB-KOLEKSI
+      const startDate = `${year}-${month}-01`;
+      const endDate = `${year}-${month}-31`;
+
       const q = query(
         collection(db, `schools/${schoolId}/attendances`),
         where("user_id", "==", userId),
+        where("date", ">=", startDate),
+        where("date", "<=", endDate),
       );
 
       const querySnapshot = await getDocs(q);
       const history = [];
-      const searchPrefix = `${year}-${month}`;
 
       querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        if (data.date && data.date.startsWith(searchPrefix)) {
-          history.push({ id: doc.id, ...data });
-        }
+        history.push({ id: doc.id, ...doc.data() });
       });
 
       return history.sort((a, b) => b.date.localeCompare(a.date));
     } catch (error) {
       console.error("Error fetching history:", error);
       return [];
+    }
+  },
+
+  // ==========================================
+  // 5. SINKRONISASI OFFLINE BATCH (OPTIMASI BIAYA & BATERAI)
+  // ==========================================
+  syncOfflineBatch: async (queueData) => {
+    if (!queueData || queueData.length === 0) return true;
+
+    try {
+      const batch = writeBatch(db);
+
+      queueData.forEach((data) => {
+        const absoluteDateObj = new Date(data.timestamp);
+        const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
+        const docId = `${data.nip}_${trueDateStr}`;
+        const docRef = doc(db, `schools/${data.school_id}/attendances`, docId);
+
+        if (data.type === "datang") {
+          // Logika CheckIn
+          batch.set(
+            docRef,
+            {
+              user_id: data.nip,
+              school_id: data.school_id,
+              date: trueDateStr,
+              check_in: {
+                time: new Date(data.timestamp),
+                latitude: data.lat,
+                longitude: data.lng,
+                distance_meters: data.distance,
+                device_info: "Offline-Sync",
+              },
+              check_out: null,
+              total_hours: 0,
+              status: "Belum Pulang",
+              is_offline_sync: true,
+              server_created_at: serverTimestamp(),
+            },
+            { merge: true },
+          );
+        } else if (data.type === "pulang") {
+          // Logika CheckOut
+          let checkInDate;
+          if (data.checkInTime === "[AUTO-INJECT]") {
+            checkInDate = absoluteDateObj;
+          } else {
+            checkInDate = data.checkInTime?.toDate
+              ? data.checkInTime.toDate()
+              : new Date(data.checkInTime || absoluteDateObj); 
+              // Fallback terakhir dijamin tidak NaN
+          }
+
+          const totalHours = calculateWorkHours(checkInDate, absoluteDateObj);
+          const finalStatus = totalHours >= 8 ? "Memenuhi Target" : "Kurang Jam";
+
+          batch.update(docRef, {
+            check_out: {
+              time: new Date(data.timestamp),
+              latitude: data.lat,
+              longitude: data.lng,
+              distance_meters: data.distance,
+            },
+            total_hours: totalHours,
+            status: finalStatus,
+            is_offline_sync_out: true,
+            server_updated_at: serverTimestamp(),
+          });
+        }
+      });
+
+      // Commit semua instruksi secara bersamaan (1 Request)
+      await batch.commit();
+      return true;
+    } catch (error) {
+      console.error("Gagal melakukan Sinkronisasi Batch Offline:", error);
+      return false;
     }
   },
 };

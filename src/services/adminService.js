@@ -8,6 +8,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  getCountFromServer,
 } from "firebase/firestore";
 import { getTodayString } from "../utils/timeUtils";
 
@@ -18,23 +19,25 @@ export const adminService = {
       return { totalPegawai: 0, hadir: 0, belumHadir: 0, persentase: 0 };
 
     try {
-      // BACA DARI SUB-KOLEKSI
-      const qUsers = collection(db, `schools/${schoolId}/users`);
-      const userSnap = await getDocs(qUsers);
-
-      let totalPegawai = 0;
+      // ==========================================
+      // OPTIMASI 1: MENGGUNAKAN getCountFromServer
+      // Menghitung jumlah pegawai secara instan di sisi server.
+      // Biaya: HANYA 1 Read.
+      // ==========================================
       const validRoles = ["guru", "tendik", "kepsek"];
+      const qUsers = query(
+        collection(db, `schools/${schoolId}/users`),
+        where("role", "in", validRoles),
+      );
 
-      userSnap.forEach((doc) => {
-        const data = doc.data();
-        const role = (data.role || "").toLowerCase();
-        if (validRoles.includes(role)) {
-          totalPegawai++;
-        }
-      });
+      const userSnap = await getCountFromServer(qUsers);
+      const totalPegawai = userSnap.data().count;
 
-      // Hitung Absen Hari Ini di sub-koleksi
-      const today = getTodayString();
+      // ==========================================
+      // Kueri Tarikan Absen Hari Ini
+      // (Aman dari kebocoran karena terfilter tanggal HARI INI saja)
+      // ==========================================
+      const today = getTodayString(); // Pastikan fungsi ini sudah terdefinisi/diimpor
       const qAtt = query(
         collection(db, `schools/${schoolId}/attendances`),
         where("date", "==", today),
@@ -53,7 +56,7 @@ export const adminService = {
           att.check_in?.time === "[AUTO-INJECT]";
         const statusVal = (att.status || "").toLowerCase();
 
-        // Jangan hitung sebagai hadir jika statusnya Sakit atau Izin Pribadi
+        // Jangan hitung sebagai hadir jika statusnya Sakit atau Izin Pribadi/Kedinasan
         if (
           isInject &&
           (statusVal === "sakit" ||
@@ -62,7 +65,7 @@ export const adminService = {
         ) {
           return; // Skip (tidak dihitung hadir)
         }
-        hadir++; // Dihitung hadir (Hadir fisik ATAU Cuti/Kedinasan jika aturan sekolah menganggapnya hadir)
+        hadir++; // Dihitung hadir (Hadir fisik ATAU Cuti jika aturan sekolah menganggapnya hadir)
       });
 
       const belumHadir = Math.max(totalPegawai - hadir, 0);

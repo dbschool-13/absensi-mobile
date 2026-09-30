@@ -104,6 +104,7 @@ export default function Dashboard() {
     fetchTodayAtt();
   }, [user]);
 
+  // KODE BARU UNTUK fetchWeeklyData di Dashboard.jsx
   useEffect(() => {
     const fetchWeeklyData = async () => {
       if (!user || isOffline) return;
@@ -112,25 +113,24 @@ export default function Dashboard() {
         const endOfWk = endOfWeek(currentTime, { weekStartsOn: 1 });
         const todayStr = format(currentTime, "yyyy-MM-dd");
 
+        // Format tanggal untuk query
+        const startStr = format(startOfWk, "yyyy-MM-dd");
+        const endStr = format(endOfWk, "yyyy-MM-dd");
+
+        // OPTIMALISASI QUERY: Hanya tarik data rentang minggu ini saja! (Maks 7 dokumen)
         const q = query(
           collection(db, `schools/${user.school_id}/attendances`),
           where("user_id", "==", user.nip),
+          where("date", ">=", startStr),
+          where("date", "<=", endStr),
         );
+
         const snap = await getDocs(q);
         let pastTotal = 0;
 
         snap.forEach((doc) => {
           const data = doc.data();
-          if (!data.date) return;
-          const docDateParts = data.date.split("-");
-          const docDate = new Date(
-            docDateParts[0],
-            docDateParts[1] - 1,
-            docDateParts[2],
-          );
-          const isThisWeek = docDate >= startOfWk && docDate <= endOfWk;
-
-          if (isThisWeek && data.date !== todayStr) {
+          if (data.date !== todayStr) {
             const hours = parseFloat(data.total_hours) || 0;
             pastTotal += hours;
           }
@@ -190,52 +190,30 @@ export default function Dashboard() {
     if (queue.length === 0) return;
 
     setGlobalLoading(true);
-    let successCount = 0;
-    let newQueue = [...queue];
 
-    for (let i = 0; i < queue.length; i++) {
-      const data = queue[i];
-      try {
-        if (data.type === "datang") {
-          await attendanceService.checkIn(
-            data.nip,
-            data.school_id,
-            data.lat,
-            data.lng,
-            data.distance,
-            null,
-            data.timestamp,
-            true,
-          );
-        } else {
-          await attendanceService.checkOut(
-            data.nip,
-            data.school_id,
-            data.lat,
-            data.lng,
-            data.distance,
-            data.checkInTime,
-            null,
-            data.timestamp,
-            true,
-          );
-        }
-        newQueue = newQueue.filter((item) => item.id !== data.id);
-        successCount++;
-      } catch (error) {}
-    }
+    try {
+      // Eksekusi seluruh antrean sekaligus lewat metode Batch
+      const isSuccess = await attendanceService.syncOfflineBatch(queue);
 
-    localStorage.setItem("offline_attendance", JSON.stringify(newQueue));
-    setPendingSync(newQueue.length);
-    setGlobalLoading(false);
+      if (isSuccess) {
+        toast.success(`${queue.length} data absen offline terkirim!`);
+        // Kosongkan antrean lokal
+        localStorage.removeItem("offline_attendance");
+        setPendingSync(0);
 
-    if (successCount > 0) {
-      toast.success(`${successCount} data absen offline terkirim!`);
-      const attData = await attendanceService.getTodayAttendance(
-        user.nip,
-        user.school_id,
-      );
-      setTodayAtt(attData);
+        // Segarkan data dashboard
+        const attData = await attendanceService.getTodayAttendance(
+          user.nip,
+          user.school_id,
+        );
+        setTodayAtt(attData);
+      } else {
+        toast.error("Gagal menyinkronkan data offline. Mencoba lagi nanti.");
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setGlobalLoading(false);
     }
   };
 
@@ -666,7 +644,9 @@ export default function Dashboard() {
               <span className="text-md font-bold text-gray-800">
                 {Math.round(progressPercent)}%
               </span>
-              <p className="text-[10px] font-medium text-gray-400">Target 8 Jam</p>
+              <p className="text-[10px] font-medium text-gray-400">
+                Target 8 Jam
+              </p>
             </div>
           </div>
 
@@ -917,7 +897,8 @@ export default function Dashboard() {
             </div>
 
             <h3 className="text-lg font-bold text-gray-800 mb-1">
-              Berhasil {successModal.type === "datang" ? "Absen Masuk" : "Absen Pulang"}
+              Berhasil{" "}
+              {successModal.type === "datang" ? "Absen Masuk" : "Absen Pulang"}
             </h3>
 
             <div className="bg-gray-50 px-5 py-2 rounded-lg mb-4 mt-2 border border-gray-100">

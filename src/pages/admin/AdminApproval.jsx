@@ -3,7 +3,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { leaveService } from "../../services/leaveService";
 import { adminService } from "../../services/adminService";
 import { db } from "../../services/firebase";
-import { collection, query, onSnapshot } from "firebase/firestore";
+import { collection, query, onSnapshot, where } from "firebase/firestore";
 import toast from "react-hot-toast";
 import {
   CheckCircle,
@@ -39,7 +39,16 @@ export default function AdminApproval() {
       setTeachers(teachersData);
     });
 
-    const q = query(collection(db, `schools/${user.school_id}/leave_requests`));
+    // OPTIMASI: Hitung batas waktu 30 hari ke belakang
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const minDateStr = thirtyDaysAgo.toISOString();
+
+    // OPTIMASI: Tarik hanya data 30 hari terakhir untuk menghentikan kebocoran reads
+    const q = query(
+      collection(db, `schools/${user.school_id}/leave_requests`),
+      where("created_at", ">=", minDateStr),
+    );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const pending = [];
@@ -216,7 +225,8 @@ export default function AdminApproval() {
                           Belum Ada Riwayat
                         </p>
                         <p className="text-sm text-gray-400">
-                          Riwayat persetujuan atau penolakan akan muncul di sini.
+                          Riwayat persetujuan atau penolakan akan muncul di
+                          sini.
                         </p>
                       </>
                     )}

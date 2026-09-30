@@ -42,28 +42,38 @@ export default function AdminMonitoring() {
   }, [user]);
 
   useEffect(() => {
-    if (user?.school_id) {
-      const today = format(new Date(), "yyyy-MM-dd");
+    // 1. Return awal jika school_id belum siap (mencegah query error)
+    if (!user?.school_id) return;
 
-      // ==========================================================
-      // PERBAIKAN 1: Baca langsung dari Sub-Koleksi Sekolah
-      // ==========================================================
-      const q = query(
-        collection(db, `schools/${user.school_id}/attendances`),
-        where("date", "==", today),
-      );
+    const today = format(new Date(), "yyyy-MM-dd");
 
-      const unsubscribe = onSnapshot(q, (snapshot) => {
+    // 2. Query sudah sangat optimal: Terkunci di Sub-Koleksi dan Tanggal Hari Ini
+    const q = query(
+      collection(db, `schools/${user.school_id}/attendances`),
+      where("date", "==", today)
+    );
+
+    // 3. Tambahkan penanganan error di parameter ketiga onSnapshot
+    const unsubscribe = onSnapshot(
+      q, 
+      (snapshot) => {
         const todayData = [];
-        snapshot.forEach((doc) =>
-          todayData.push({ id: doc.id, ...doc.data() }),
-        );
+        snapshot.forEach((doc) => {
+          todayData.push({ id: doc.id, ...doc.data() });
+        });
         setRealtimeAtt(todayData);
-      });
+      },
+      (error) => {
+        console.error("Terjadi kesalahan pada Live Listener Absensi:", error);
+        // Bisa tambahkan toast.error disini jika ingin memberi tahu Admin
+      }
+    );
 
-      return () => unsubscribe();
-    }
-  }, [user]);
+    // 4. Bersihkan memori saat Admin berpindah halaman
+    return () => unsubscribe();
+    
+    // 5. OPTIMASI: Bergantung murni pada school_id, bukan seluruh objek user
+  }, [user?.school_id]);
 
   // ==========================================================
   // PERBAIKAN 2: Logika Pembacaan Auto-Inject Arsitektur Baru

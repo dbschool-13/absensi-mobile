@@ -127,13 +127,22 @@ export default function AdminRekap() {
           ),
         ];
 
-        let combinedAttendances = [];
-        for (const monthYear of uniqueMonthsYears) {
+        // ====================================================
+        // OPTIMASI: EKSEKUSI PARALEL (PROMISE.ALL)
+        // Mencegah looping berurutan (bottleneck) dan menghemat Reads
+        // ====================================================
+        const fetchPromises = uniqueMonthsYears.map((monthYear) => {
           const [m, y] = monthYear.split("-");
-          const data = await adminService.getRekapData(user.school_id, m, y);
-          combinedAttendances = [...combinedAttendances, ...data];
-        }
+          return adminService.getRekapData(user.school_id, m, y);
+        });
 
+        // Tunggu semua bulan selesai ditarik secara bersamaan
+        const resultsArray = await Promise.all(fetchPromises);
+
+        // Gabungkan array dari semua bulan menjadi satu (flatten)
+        const combinedAttendances = resultsArray.flat();
+
+        // Filter unik berdasarkan ID Dokumen agar tidak ada absen yang ganda
         const uniqueAttendances = Array.from(
           new Map(combinedAttendances.map((item) => [item.id, item])).values(),
         );
@@ -142,6 +151,7 @@ export default function AdminRekap() {
         setLoading(false);
       }
     };
+
     fetchMasterData();
   }, [user, availableWeeks]);
 
