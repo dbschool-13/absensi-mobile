@@ -63,7 +63,7 @@ export default function AdminLayout() {
       <aside className="w-64 bg-white border-r border-gray-100 flex flex-col shadow-xl z-20">
         {/* Logo Sekolah */}
         <div className="h-20 flex items-center gap-3 px-6 border-b border-gray-50">
-          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center p-1">
+          <div className="w-16 h-16 rounded-full  flex items-center justify-center p-1">
             {schoolData?.logo_url ? (
               <img
                 src={schoolData.logo_url}
@@ -75,7 +75,7 @@ export default function AdminLayout() {
             )}
           </div>
           <div>
-            <h1 className="font-bold text-gray-800 text-sm line-clamp-1">
+            <h1 className="font-bold text-gray-800 text-sm ">
               {schoolData?.name || "Admin Panel"}
             </h1>
             <p className="text-[10px] text-gray-400 uppercase tracking-widest">
