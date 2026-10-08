@@ -127,22 +127,14 @@ export default function AdminRekap() {
           ),
         ];
 
-        // ====================================================
-        // OPTIMASI: EKSEKUSI PARALEL (PROMISE.ALL)
-        // Mencegah looping berurutan (bottleneck) dan menghemat Reads
-        // ====================================================
         const fetchPromises = uniqueMonthsYears.map((monthYear) => {
           const [m, y] = monthYear.split("-");
           return adminService.getRekapData(user.school_id, m, y);
         });
 
-        // Tunggu semua bulan selesai ditarik secara bersamaan
         const resultsArray = await Promise.all(fetchPromises);
-
-        // Gabungkan array dari semua bulan menjadi satu (flatten)
         const combinedAttendances = resultsArray.flat();
 
-        // Filter unik berdasarkan ID Dokumen agar tidak ada absen yang ganda
         const uniqueAttendances = Array.from(
           new Map(combinedAttendances.map((item) => [item.id, item])).values(),
         );
@@ -151,13 +143,10 @@ export default function AdminRekap() {
         setLoading(false);
       }
     };
-
+    
     fetchMasterData();
   }, [user, availableWeeks]);
 
-  // ====================================================
-  // PERBAIKAN: LOGIKA AUTO-INJECT PADA REKAPITULASI
-  // ====================================================
   useEffect(() => {
     if (teachers.length > 0) {
       const filteredTeachers =
@@ -236,12 +225,18 @@ export default function AdminRekap() {
         const teksKekurangan =
           selisihJamRaw > 0 ? `${kurangJam}j ${kurangMenit}m` : "Tuntas";
 
-        const persentase =
+        // KALKULASI 1: PERSENTASE KINERJA (BERDASARKAN TOTAL JAM)
+        const persentaseKinerja =
           targetJam === 0
             ? 0
             : Math.min(Math.round((totalJamKerjaRaw / targetJam) * 100), 100);
 
+        // KALKULASI 2: PERSENTASE KEHADIRAN (BERDASARKAN KEHADIRAN FISIK)
         const countAlpa = Math.max(hariKerjaAktif - absensiAktif.length, 0);
+        const persentaseKehadiran = 
+          hariKerjaAktif === 0 
+            ? 0 
+            : Math.round((countHadir / hariKerjaAktif) * 100);
 
         rTabel.push({
           nip: guru.nip,
@@ -253,7 +248,8 @@ export default function AdminRekap() {
           alpa: countAlpa,
           totalJamKerja: parseFloat(totalJamKerjaRaw.toFixed(1)),
           teksKekurangan,
-          persentase,
+          persentase: persentaseKinerja, 
+          persentaseKehadiran: persentaseKehadiran // Disimpan untuk UI dan fungsi Export
         });
 
         if (targetWeek) {
@@ -454,14 +450,15 @@ export default function AdminRekap() {
                 <th className="p-5 text-center text-orange-500">
                   Kekurangan Jam
                 </th>
-                <th className="p-5 text-center">Kinerja</th>
+                <th className="p-5 text-center text-teal-600">Kehadiran</th>
+                <th className="p-5 text-center">Jam Kerja</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
                   <td
-                    colSpan="10"
+                    colSpan="11"
                     className="p-8 text-center text-gray-400 font-medium"
                   >
                     Memuat data...
@@ -470,7 +467,7 @@ export default function AdminRekap() {
               ) : rekapBulanan.length === 0 ? (
                 <tr>
                   <td
-                    colSpan="10"
+                    colSpan="11"
                     className="p-8 text-center text-gray-400 font-medium"
                   >
                     Tidak ada data rekap untuk periode ini.
@@ -516,6 +513,19 @@ export default function AdminRekap() {
                       }`}
                     >
                       {row.teksKekurangan}
+                    </td>
+                    <td className="p-5 text-center">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-bold ${
+                          row.persentaseKehadiran >= 80
+                            ? "bg-teal-50 text-teal-600"
+                            : row.persentaseKehadiran >= 50
+                            ? "bg-orange-50 text-orange-600"
+                            : "bg-red-50 text-red-600"
+                        }`}
+                      >
+                        {row.persentaseKehadiran}%
+                      </span>
                     </td>
                     <td className="p-5 text-center">
                       <span

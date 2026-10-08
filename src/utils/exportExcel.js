@@ -35,6 +35,8 @@ export const exportToExcel = async (
 
   worksheet.getColumn(colIndex).width = 15; // Total Jam
   worksheet.getColumn(colIndex + 1).width = 15; // Kekurangan Jam
+  worksheet.getColumn(colIndex + 2).width = 15; // Kehadiran (%)
+  worksheet.getColumn(colIndex + 3).width = 15; // Kinerja (%)
 
   // 2. Buat Header Row 1 (Hari)
   const row1 = worksheet.getRow(1);
@@ -47,8 +49,11 @@ export const exportToExcel = async (
     worksheet.mergeCells(1, currentCell, 1, currentCell + 1);
     currentCell += 2;
   });
+  
   row1.getCell(currentCell).value = "Total Jam\nMinggu Ini";
   row1.getCell(currentCell + 1).value = "Kekurangan\nJam";
+  row1.getCell(currentCell + 2).value = "Kehadiran\n(%)";
+  row1.getCell(currentCell + 3).value = "Jam Kerja\n(%)";
 
   // 3. Buat Header Row 2 (Tanggal)
   const row2 = worksheet.getRow(2);
@@ -70,11 +75,13 @@ export const exportToExcel = async (
     currentCell += 2;
   });
 
-  // Merge untuk No, Nama, Total, Kekurangan agar tergabung ke bawah (Row 1-3)
+  // Merge untuk sel di kanan (Total, Kekurangan, Kehadiran, Kinerja) agar tergabung ke bawah (Row 1-3)
   worksheet.mergeCells("A1:A3"); // No
   worksheet.mergeCells("B1:B3"); // Nama
   worksheet.mergeCells(1, currentCell, 3, currentCell); // Total Jam
   worksheet.mergeCells(1, currentCell + 1, 3, currentCell + 1); // Kekurangan Jam
+  worksheet.mergeCells(1, currentCell + 2, 3, currentCell + 2); // Kehadiran
+  worksheet.mergeCells(1, currentCell + 3, 3, currentCell + 3); // Kinerja
 
   // Style Header (Tengah, Bold, Border)
   for (let i = 1; i <= 3; i++) {
@@ -114,6 +121,7 @@ export const exportToExcel = async (
 
     let cIndex = 3;
     let totalJamKerja = 0;
+    let countHadir = 0; // Hitungan Kehadiran Fisik per minggu
 
     // Data Per Hari (Senin - Jumat)
     weekDates.forEach((date) => {
@@ -133,9 +141,6 @@ export const exportToExcel = async (
       cellPulang.value = "-";
 
       if (absenHariIni) {
-        // =========================================================
-        // LOGIKA BARU: BACA AUTO-INJECT & STATUS
-        // =========================================================
         const isAutoInject =
           absenHariIni.is_auto_injected === true ||
           absenHariIni.check_in?.time === "[AUTO-INJECT]";
@@ -166,6 +171,7 @@ export const exportToExcel = async (
           cellDatang.font = { color: { argb: "FFFFA500" }, bold: true }; // Warna Oranye
         } else {
           // JIKA HADIR NORMAL DI SEKOLAH
+          countHadir++;
           const isTargetMet =
             absenHariIni.status === "Memenuhi Target" ||
             absenHariIni.total_hours >= 8;
@@ -195,19 +201,41 @@ export const exportToExcel = async (
       cIndex += 2;
     });
 
-    // Total Jam & Kekurangan Jam
+    // Kalkulasi Rekap Mingguan
     const targetJamSeminggu = weekDates.length * 8;
-    const kekurangan = targetJamSeminggu - totalJamKerja;
+    const kekurangan = Math.max(targetJamSeminggu - totalJamKerja, 0);
+    
+    const persentaseKehadiran = weekDates.length === 0 
+      ? 0 
+      : Math.round((countHadir / weekDates.length) * 100);
+      
+    const persentaseKinerja = targetJamSeminggu === 0 
+      ? 0 
+      : Math.min(Math.round((totalJamKerja / targetJamSeminggu) * 100), 100);
 
+    // Total Jam
     const totalCell = row.getCell(cIndex);
     totalCell.value = parseFloat(totalJamKerja.toFixed(1));
     totalCell.alignment = { vertical: "middle", horizontal: "center" };
     totalCell.font = { bold: true };
 
+    // Kekurangan Jam
     const kurangCell = row.getCell(cIndex + 1);
     kurangCell.value = kekurangan > 0 ? parseFloat(kekurangan.toFixed(1)) : 0;
     kurangCell.alignment = { vertical: "middle", horizontal: "center" };
     kurangCell.font = { color: { argb: "FFFF0000" }, bold: true };
+
+    // Persentase Kehadiran
+    const hadirCell = row.getCell(cIndex + 2);
+    hadirCell.value = `${persentaseKehadiran}%`;
+    hadirCell.alignment = { vertical: "middle", horizontal: "center" };
+    hadirCell.font = { bold: true };
+
+    // Persentase Kinerja
+    const kinerjaCell = row.getCell(cIndex + 3);
+    kinerjaCell.value = `${persentaseKinerja}%`;
+    kinerjaCell.alignment = { vertical: "middle", horizontal: "center" };
+    kinerjaCell.font = { bold: true };
 
     // Terapkan border ke seluruh baris
     row.eachCell({ includeEmpty: true }, (cell) => {
@@ -221,6 +249,38 @@ export const exportToExcel = async (
 
     rowIndex++;
   });
+
+  // ==========================================
+  // BLOK TANDA TANGAN KEPALA SEKOLAH (EXCEL)
+  // ==========================================
+  // Berikan jarak 3 baris kosong setelah tabel selesai
+  const ttdStartRow = rowIndex + 3;
+  const today = new Date();
+  const monthsIndo = [
+    "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+  ];
+  const tglStr = `${String(today.getDate()).padStart(2, "0")} ${monthsIndo[today.getMonth()]} ${today.getFullYear()}`;
+
+  // Tentukan letak kolom tanda tangan (di pojok kanan tabel)
+  const signCol = currentCell + 2; 
+
+  const rowTgl = worksheet.getRow(ttdStartRow);
+  rowTgl.getCell(signCol).value = `Makassar, ${tglStr}`;
+  rowTgl.getCell(signCol).font = { size: 11 };
+
+  const rowJabatan = worksheet.getRow(ttdStartRow + 1);
+  rowJabatan.getCell(signCol).value = "Kepala Sekolah";
+  rowJabatan.getCell(signCol).font = { size: 11 };
+
+  // Sisihkan 4 baris kosong untuk area tanda tangan basah
+  const rowNama = worksheet.getRow(ttdStartRow + 5);
+  rowNama.getCell(signCol).value = "Muhammad Kasim, S.Pd., M.Pd";
+  rowNama.getCell(signCol).font = { bold: true, size: 11 };
+
+  const rowNip = worksheet.getRow(ttdStartRow + 6);
+  rowNip.getCell(signCol).value = "NIP. 19720319 199903 1 002";
+  rowNip.getCell(signCol).font = { size: 11 };
 
   // Export File
   const buffer = await workbook.xlsx.writeBuffer();

@@ -2,8 +2,8 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
 export const exportToPDF = (rekapData, schoolName, monthLabel, year) => {
-  // Menggunakan orientasi landscape ('l') jika dirasa kolom terlalu padat,
-  // namun untuk 10 kolom ini, portrait ('p') default masih sangat muat dan rapi.
+  // Tetap menggunakan orientasi portrait ('p') dengan penyesuaian padding dan lebar sel 
+  // agar 11 kolom masuk dengan rapi.
   const doc = new jsPDF("p", "mm", "a4");
 
   // Header PDF
@@ -16,7 +16,7 @@ export const exportToPDF = (rekapData, schoolName, monthLabel, year) => {
   doc.text(`Instansi: ${schoolName || "Sekolah"}`, 14, 28);
   doc.text(`Periode : ${monthLabel} ${year}`, 14, 34);
 
-  // Definisi Header Tabel PDF (Sesuai Standar Dinas)
+  // Definisi Header Tabel PDF (Ditambah Kolom Kehadiran)
   const tableColumn = [
     "No",
     "Nama Pegawai & NIP",
@@ -27,7 +27,8 @@ export const exportToPDF = (rekapData, schoolName, monthLabel, year) => {
     "A", // Alpa
     "Total Jam",
     "Kekurangan",
-    "Kinerja",
+    "Kehadiran", // BARU: Metrik Kehadiran Fisik
+    "Jam Kerja",   // Metrik Pemenuhan Jam
   ];
 
   const tableRows = [];
@@ -44,7 +45,8 @@ export const exportToPDF = (rekapData, schoolName, monthLabel, year) => {
       data.alpa,
       `${data.totalJamKerja} Jam`,
       data.teksKekurangan,
-      `${data.persentase}%`,
+      `${data.persentaseKehadiran}%`, // Injeksi Persentase Kehadiran
+      `${data.persentase}%`,          // Persentase Kinerja
     ]);
   });
 
@@ -62,21 +64,22 @@ export const exportToPDF = (rekapData, schoolName, monthLabel, year) => {
       fontStyle: "bold",
     },
     styles: {
-      fontSize: 8, // Diperkecil sedikit agar data muat dengan elegan
+      fontSize: 8, // Diperkecil sedikit agar 11 kolom muat dengan elegan
       valign: "middle",
-      cellPadding: 3,
+      cellPadding: 2,
     },
     columnStyles: {
-      0: { halign: "center", cellWidth: 10 }, // No
-      1: { cellWidth: 60 }, // Nama & NIP
-      2: { halign: "center", cellWidth: 10 }, // H
-      3: { halign: "center", cellWidth: 10 }, // I
-      4: { halign: "center", cellWidth: 10 }, // S
-      5: { halign: "center", cellWidth: 10 }, // C
-      6: { halign: "center", cellWidth: 10 }, // A
-      7: { halign: "center", cellWidth: 20 }, // Total Jam
-      8: { halign: "center", cellWidth: 25 }, // Kekurangan
-      9: { halign: "center", cellWidth: 20 }, // Kinerja (Persentase)
+      0: { halign: "center", cellWidth: 10 },  // No
+      1: { cellWidth: 54 },                   // Nama & NIP
+      2: { halign: "center", cellWidth: 9 },  // H
+      3: { halign: "center", cellWidth: 9 },  // I
+      4: { halign: "center", cellWidth: 9 },  // S
+      5: { halign: "center", cellWidth: 9 },  // C
+      6: { halign: "center", cellWidth: 9 },  // A
+      7: { halign: "center", cellWidth: 18 }, // Total Jam
+      8: { halign: "center", cellWidth: 24 }, // Kekurangan
+      9: { halign: "center", cellWidth: 18 }, // Kehadiran
+      10: { halign: "center", cellWidth: 18 },// Kinerja
     },
   });
 
@@ -87,10 +90,34 @@ export const exportToPDF = (rekapData, schoolName, monthLabel, year) => {
   doc.text("Keterangan:", 14, finalY);
   doc.setFont(undefined, "normal");
   doc.text(
-    "H = Hadir     I = Izin Pribadi / Kedinasan     S = Sakit     C = Cuti     A = Alpa (Tanpa Keterangan)",
+    "H = Hadir    I = Izin Pribadi / Kedinasan    S = Sakit    C = Cuti    A = Alpa (Tanpa Keterangan)",
     14,
     finalY + 6,
   );
+
+  // ==========================================
+  // BLOK TANDA TANGAN (Kanan Bawah)
+  // ==========================================
+  const ttdY = finalY + 20; // Jarak vertikal dari legenda
+  const ttdX = 135; // Posisi X di sebelah kanan (Kertas A4 lebarnya 210mm)
+
+  // Mengambil tanggal hari ini dan format ke Bahasa Indonesia
+  const today = new Date();
+  const monthsIndo = [
+    "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+  ];
+  const tglStr = `${String(today.getDate()).padStart(2, "0")} ${monthsIndo[today.getMonth()]} ${today.getFullYear()}`;
+
+  // Render teks tanda tangan rata kiri pada kordinat ttdX
+  doc.text(`Makassar, ${tglStr}`, ttdX, ttdY);
+  doc.text("Kepala Sekolah", ttdX, ttdY + 6);
+  
+  // Ruang kosong untuk tanda tangan basah (sekitar 24 satuan)
+  doc.setFont(undefined, "bold");
+  doc.text("Muhammad Kasim, S.Pd., M.Pd", ttdX, ttdY + 30);
+  doc.setFont(undefined, "normal");
+  doc.text("NIP. 19720319 199903 1 002", ttdX, ttdY + 35);
 
   // Proses Download
   doc.save(`Rekap_Absen_${schoolName || "Sekolah"}_${monthLabel}_${year}.pdf`);

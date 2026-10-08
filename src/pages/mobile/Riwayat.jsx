@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { attendanceService } from "../../services/attendanceService";
 import {
@@ -7,15 +7,62 @@ import {
   Target,
   ChevronDown,
   AlertCircle,
+  CalendarCheck,
 } from "lucide-react";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, startOfWeek, addDays } from "date-fns";
 import { id } from "date-fns/locale";
+
+// =================================================================
+// HELPER: LOGIKA MINGGU KERJA (SINKRON 100% DENGAN ADMIN REKAP)
+// =================================================================
+const getWorkingWeeks = (
+  month,
+  year,
+  workingDays = [1, 2, 3, 4, 5],
+  holidays = [],
+) => {
+  const weeks = [];
+  const firstDayOfMonth = new Date(year, parseInt(month) - 1, 1);
+  let currentMonday = startOfWeek(firstDayOfMonth, { weekStartsOn: 1 });
+  let weekId = 1;
+
+  while (
+    (currentMonday.getMonth() <= parseInt(month) - 1 &&
+      currentMonday.getFullYear() == year) ||
+    weekId === 1
+  ) {
+    if (weekId > 1 && currentMonday.getMonth() !== parseInt(month) - 1) break;
+
+    const currentWeekDays = [];
+    for (let i = 0; i < 7; i++) {
+      const currentDay = addDays(currentMonday, i);
+      const dayOfWeek = currentDay.getDay();
+      const dateStr = format(currentDay, "yyyy-MM-dd");
+      const isHoliday = holidays.some((h) => h.date === dateStr);
+
+      if (workingDays.includes(dayOfWeek) && !isHoliday) {
+        currentWeekDays.push(currentDay);
+      }
+    }
+
+    if (currentWeekDays.length > 0) {
+      weeks.push({
+        id: weekId,
+        label: `Minggu ${weekId}`,
+        dates: currentWeekDays,
+      });
+    }
+
+    currentMonday = addDays(currentMonday, 7);
+    weekId++;
+  }
+  return weeks;
+};
 
 // Helper aman memformat waktu, langsung menerima label izin dari logika utama
 const formatTimeSafe = (timeData, injectLabel) => {
   if (!timeData) return "--:--";
 
-  // Deteksi teks [AUTO-INJECT] dari database
   if (
     timeData === "[AUTO-INJECT]" ||
     (typeof timeData === "string" && timeData.includes("AUTO-INJECT"))
@@ -33,10 +80,10 @@ const formatTimeSafe = (timeData, injectLabel) => {
 };
 
 export default function Riwayat() {
-  const { user } = useAuth();
+  const { user, schoolData } = useAuth();
   const currentDate = new Date();
 
-  // State Filter (Default: Bulan & Tahun saat ini)
+  // State Filter
   const [selectedMonth, setSelectedMonth] = useState(format(currentDate, "MM"));
   const [selectedYear, setSelectedYear] = useState(format(currentDate, "yyyy"));
 
@@ -62,24 +109,125 @@ export default function Riwayat() {
   const currentYear = parseInt(format(currentDate, "yyyy"));
   const years = [currentYear - 1, currentYear, currentYear + 1];
 
-  // Fetch Data setiap kali Bulan/Tahun berubah
+  // Aturan Hari Kerja & Libur dari Master Data
+  const activeWorkingDaysDef = schoolData?.working_days || [1, 2, 3, 4, 5];
+  const holidaysDef = schoolData?.holidays || [];
+
+  // Kalkulasi Minggu & Hari Aktif (Sinkron dengan Admin)
+  const availableWeeks = useMemo(() => {
+    return getWorkingWeeks(
+      selectedMonth,
+      selectedYear,
+      activeWorkingDaysDef,
+      holidaysDef,
+    );
+  }, [selectedMonth, selectedYear, activeWorkingDaysDef, holidaysDef]);
+
+  const totalHariKerjaBulanIni = useMemo(() => {
+    let total = 0;
+    availableWeeks.forEach((week) => (total += week.dates.length));
+    return total;
+  }, [availableWeeks]);
+
+  // ============================================================
+  // FETCH DATA: PARALLEL LINTAS BULAN (SINKRON ADMIN REKAP)
+  // ============================================================
   useEffect(() => {
     const fetchHistory = async () => {
-      setLoading(true);
-      if (user && user.school_id) {
-        const data = await attendanceService.getHistory(
-          user.nip,
-          user.school_id,
-          selectedMonth,
-          selectedYear,
+      if (user?.school_id && availableWeeks.length > 0) {
+        setLoading(true);
+
+        // Deteksi jika minggu kerja melintasi 2 bulan yang berbeda
+        const uniqueMonthsYears = [
+          ...new Set(
+            availableWeeks.flatMap((w) =>
+              w.dates.map((d) => format(d, "MM-yyyy")),
+            ),
+          ),
+        ];
+
+        // Tarik data paralel untuk semua bulan yang terlibat
+        const fetchPromises = uniqueMonthsYears.map((monthYear) => {
+          const [m, y] = monthYear.split("-");
+          return attendanceService.getHistory(user.nip, user.school_id, m, y);
+        });
+
+        const resultsArray = await Promise.all(fetchPromises);
+        const combinedAttendances = resultsArray.flat();
+
+        // Buang data duplikat (jika ada overlap)
+        const uniqueAttendances = Array.from(
+          new Map(combinedAttendances.map((item) => [item.id, item])).values(),
         );
-        setHistory(data);
+
+        // HANYA ambil absensi yang masuk di dalam tanggal aktif (allValidDates)
+        const allValidDates = new Set(
+          availableWeeks.flatMap((w) =>
+            w.dates.map((d) => format(d, "yyyy-MM-dd")),
+          ),
+        );
+
+        const absensiAktif = uniqueAttendances.filter((att) =>
+          allValidDates.has(att.date),
+        );
+
+        // Urutkan dari yang terbaru
+        absensiAktif.sort((a, b) => b.date.localeCompare(a.date));
+
+        setHistory(absensiAktif);
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     fetchHistory();
-  }, [user, selectedMonth, selectedYear]);
+  }, [user, availableWeeks]);
+
+  // ============================================================
+  // KALKULASI METRIK (Total Jam, Kehadiran %, Kinerja %)
+  // ============================================================
+  const summary = useMemo(() => {
+    let countHadir = 0;
+    let totalJamKerjaRaw = 0;
+
+    history.forEach((att) => {
+      const isAutoInject =
+        att.is_auto_injected === true || att.check_in?.time === "[AUTO-INJECT]";
+
+      if (isAutoInject) {
+        const statusVal = (att.status || "").toLowerCase();
+        if (
+          !(
+            statusVal === "cuti" ||
+            statusVal === "sakit" ||
+            statusVal.includes("izin")
+          )
+        ) {
+          countHadir++;
+        }
+      } else {
+        countHadir++;
+      }
+
+      totalJamKerjaRaw += att.total_hours || 0;
+    });
+
+    const targetJam = totalHariKerjaBulanIni * 8;
+    const persentaseKinerja =
+      targetJam === 0
+        ? 0
+        : Math.min(Math.round((totalJamKerjaRaw / targetJam) * 100), 100);
+        
+    const persentaseKehadiran =
+      totalHariKerjaBulanIni === 0
+        ? 0
+        : Math.round((countHadir / totalHariKerjaBulanIni) * 100);
+
+    return {
+      totalJamDisplay: parseFloat(totalJamKerjaRaw.toFixed(1)),
+      persentaseKehadiran,
+      persentaseKinerja,
+    };
+  }, [history, totalHariKerjaBulanIni]);
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24 font-sans">
@@ -100,7 +248,6 @@ export default function Riwayat() {
 
       {/* FILTER SECTION */}
       <div className="-mt-8 mx-5 bg-white rounded-2xl shadow-xl shadow-gray-200/50 p-4 relative z-20 border border-gray-100 flex gap-3">
-        {/* Dropdown Bulan */}
         <div className="flex-1 relative">
           <select
             value={selectedMonth}
@@ -119,7 +266,6 @@ export default function Riwayat() {
           />
         </div>
 
-        {/* Dropdown Tahun */}
         <div className="w-1/3 relative">
           <select
             value={selectedYear}
@@ -136,6 +282,42 @@ export default function Riwayat() {
             size={16}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
           />
+        </div>
+      </div>
+
+      {/* ======================================================== */}
+      {/* SUMMARY STATS (METRIK REKAP) SECTION */}
+      {/* ======================================================== */}
+      <div className="px-5 mt-5 grid grid-cols-3 gap-3">
+        {/* Total Jam */}
+        <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex flex-col items-center justify-center shadow-sm">
+          <Clock size={20} className="text-indigo-500 mb-1" />
+          <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wide">
+            Total Jam
+          </span>
+          <span className="text-sm font-black text-indigo-700">
+            {summary.totalJamDisplay}
+          </span>
+        </div>
+        {/* Kehadiran */}
+        <div className="bg-teal-50 border border-teal-100 rounded-2xl p-4 flex flex-col items-center justify-center shadow-sm">
+          <CalendarCheck size={20} className="text-teal-500 mb-1" />
+          <span className="text-[10px] text-teal-400 font-bold uppercase tracking-wide">
+            Kehadiran
+          </span>
+          <span className="text-sm font-black text-teal-700">
+            {summary.persentaseKehadiran}%
+          </span>
+        </div>
+        {/* Kinerja */}
+        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex flex-col items-center justify-center shadow-sm">
+          <Target size={20} className="text-emerald-500 mb-1" />
+          <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wide">
+            Jam Kerja
+          </span>
+          <span className="text-sm font-black text-emerald-700">
+            {summary.persentaseKinerja}%
+          </span>
         </div>
       </div>
 
@@ -168,9 +350,6 @@ export default function Riwayat() {
           history.map((item) => {
             const dateObj = parseISO(item.date);
 
-            // ==========================================
-            // LOGIKA OVERRIDE DETEKSI IZIN/CUTI (ARSITEKTUR BARU)
-            // ==========================================
             const isAutoInject =
               item.is_auto_injected === true ||
               item.check_in?.time === "[AUTO-INJECT]";
@@ -198,7 +377,6 @@ export default function Riwayat() {
                 badgeLabel = "Izin Pribadi";
                 badgeClass = "bg-blue-50 text-blue-600 border-blue-200";
               } else {
-                // Fallback dinamis jika ada status jenis lain di masa depan
                 badgeLabel =
                   statusVal
                     .split("_")
@@ -208,7 +386,6 @@ export default function Riwayat() {
                   "bg-emerald-50 text-emerald-600 border-emerald-200";
               }
             } else {
-              // Logika Absen Fisik Normal
               if (!item.check_out) {
                 badgeLabel = "Belum Pulang";
                 badgeClass = "bg-blue-50 text-blue-600 border-blue-200";
@@ -222,7 +399,6 @@ export default function Riwayat() {
               }
             }
 
-            // Hitung kekurangan jam khusus untuk absen fisik yang kurang
             let shortText = null;
             if (
               item.check_out &&
@@ -277,7 +453,6 @@ export default function Riwayat() {
                         Masuk
                       </p>
                       <p className="font-bold text-gray-800">
-                        {/* Suntik label dinamis ke fungsi formatTimeSafe */}
                         {formatTimeSafe(item.check_in?.time, badgeLabel)}
                       </p>
                     </div>
