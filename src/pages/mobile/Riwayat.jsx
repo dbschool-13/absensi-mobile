@@ -13,7 +13,7 @@ import { format, parseISO, startOfWeek, addDays } from "date-fns";
 import { id } from "date-fns/locale";
 
 // =================================================================
-// HELPER: LOGIKA MINGGU KERJA (SINKRON 100% DENGAN ADMIN REKAP)
+// HELPER: LOGIKA MINGGU KERJA (SINKRON DENGAN ADMIN REKAP)
 // =================================================================
 const getWorkingWeeks = (
   month,
@@ -90,7 +90,6 @@ export default function Riwayat() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Generate Opsi Bulan & Tahun
   const months = [
     { value: "01", label: "Januari" },
     { value: "02", label: "Februari" },
@@ -109,11 +108,9 @@ export default function Riwayat() {
   const currentYear = parseInt(format(currentDate, "yyyy"));
   const years = [currentYear - 1, currentYear, currentYear + 1];
 
-  // Aturan Hari Kerja & Libur dari Master Data
   const activeWorkingDaysDef = schoolData?.working_days || [1, 2, 3, 4, 5];
   const holidaysDef = schoolData?.holidays || [];
 
-  // Kalkulasi Minggu & Hari Aktif (Sinkron dengan Admin)
   const availableWeeks = useMemo(() => {
     return getWorkingWeeks(
       selectedMonth,
@@ -130,14 +127,13 @@ export default function Riwayat() {
   }, [availableWeeks]);
 
   // ============================================================
-  // FETCH DATA: PARALLEL LINTAS BULAN (SINKRON ADMIN REKAP)
+  // FETCH DATA: PARALLEL LINTAS BULAN UNTUK KALKULASI REKAP
   // ============================================================
   useEffect(() => {
     const fetchHistory = async () => {
       if (user?.school_id && availableWeeks.length > 0) {
         setLoading(true);
 
-        // Deteksi jika minggu kerja melintasi 2 bulan yang berbeda
         const uniqueMonthsYears = [
           ...new Set(
             availableWeeks.flatMap((w) =>
@@ -146,7 +142,6 @@ export default function Riwayat() {
           ),
         ];
 
-        // Tarik data paralel untuk semua bulan yang terlibat
         const fetchPromises = uniqueMonthsYears.map((monthYear) => {
           const [m, y] = monthYear.split("-");
           return attendanceService.getHistory(user.nip, user.school_id, m, y);
@@ -155,23 +150,21 @@ export default function Riwayat() {
         const resultsArray = await Promise.all(fetchPromises);
         const combinedAttendances = resultsArray.flat();
 
-        // Buang data duplikat (jika ada overlap)
         const uniqueAttendances = Array.from(
           new Map(combinedAttendances.map((item) => [item.id, item])).values(),
         );
 
-        // HANYA ambil absensi yang masuk di dalam tanggal aktif (allValidDates)
         const allValidDates = new Set(
           availableWeeks.flatMap((w) =>
             w.dates.map((d) => format(d, "yyyy-MM-dd")),
           ),
         );
 
+        // history digunakan PUSAT KALKULASI (berisi rentang minggu aktif)
         const absensiAktif = uniqueAttendances.filter((att) =>
           allValidDates.has(att.date),
         );
 
-        // Urutkan dari yang terbaru
         absensiAktif.sort((a, b) => b.date.localeCompare(a.date));
 
         setHistory(absensiAktif);
@@ -184,6 +177,7 @@ export default function Riwayat() {
 
   // ============================================================
   // KALKULASI METRIK (Total Jam, Kehadiran %, Kinerja %)
+  // Menggunakan data 'history' yang sinkron dengan Admin Rekap
   // ============================================================
   const summary = useMemo(() => {
     let countHadir = 0;
@@ -228,6 +222,15 @@ export default function Riwayat() {
       persentaseKinerja,
     };
   }, [history, totalHariKerjaBulanIni]);
+
+  // ============================================================
+  // FILTER VISUAL (HANYA UNTUK TAMPILAN DAFTAR RIWAYAT)
+  // Menyingkirkan tanggal dari bulan berbeda yang ikut terbawa
+  // ============================================================
+  const displayHistory = useMemo(() => {
+    const targetPrefix = `${selectedYear}-${selectedMonth}`;
+    return history.filter((item) => item.date.startsWith(targetPrefix));
+  }, [history, selectedMonth, selectedYear]);
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24 font-sans">
@@ -292,7 +295,7 @@ export default function Riwayat() {
         {/* Total Jam */}
         <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex flex-col items-center justify-center shadow-sm">
           <Clock size={20} className="text-indigo-500 mb-1" />
-          <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wide">
+          <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wide text-center">
             Total Jam
           </span>
           <span className="text-sm font-black text-indigo-700">
@@ -302,7 +305,7 @@ export default function Riwayat() {
         {/* Kehadiran */}
         <div className="bg-teal-50 border border-teal-100 rounded-2xl p-4 flex flex-col items-center justify-center shadow-sm">
           <CalendarCheck size={20} className="text-teal-500 mb-1" />
-          <span className="text-[10px] text-teal-400 font-bold uppercase tracking-wide">
+          <span className="text-[10px] text-teal-400 font-bold uppercase tracking-wide text-center">
             Kehadiran
           </span>
           <span className="text-sm font-black text-teal-700">
@@ -310,12 +313,12 @@ export default function Riwayat() {
           </span>
         </div>
         {/* Kinerja */}
-        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex flex-col items-center justify-center shadow-sm">
-          <Target size={20} className="text-emerald-500 mb-1" />
-          <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wide">
+        <div className="bg-sky-50 border border-sky-100 rounded-2xl p-4 flex flex-col items-center justify-center shadow-sm">
+          <Target size={20} className="text-sky-500 mb-1" />
+          <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wide text-center">
             Jam Kerja
           </span>
-          <span className="text-sm font-black text-emerald-700">
+          <span className="text-sm font-black text-sky-700">
             {summary.persentaseKinerja}%
           </span>
         </div>
@@ -336,7 +339,7 @@ export default function Riwayat() {
               </div>
             </div>
           ))
-        ) : history.length === 0 ? (
+        ) : displayHistory.length === 0 ? (
           <div className="text-center py-12">
             <div className="w-20 h-20 bg-gray-200/50 rounded-full flex items-center justify-center mx-auto mb-4">
               <Calendar size={32} className="text-gray-400" />
@@ -347,7 +350,7 @@ export default function Riwayat() {
             </p>
           </div>
         ) : (
-          history.map((item) => {
+          displayHistory.map((item) => {
             const dateObj = parseISO(item.date);
 
             const isAutoInject =
@@ -424,7 +427,6 @@ export default function Riwayat() {
                 key={item.id}
                 className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col gap-4"
               >
-                {/* Tanggal & Status */}
                 <div className="flex justify-between items-center border-b border-gray-50 pb-2">
                   <div className="flex flex-col">
                     <span className="text-xs text-gray-400 uppercase font-bold tracking-wider">
@@ -442,7 +444,6 @@ export default function Riwayat() {
                   </div>
                 </div>
 
-                {/* Info Jam */}
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center border border-emerald-100">
@@ -473,7 +474,6 @@ export default function Riwayat() {
                   </div>
                 </div>
 
-                {/* Total Jam Kerja & Kekurangan */}
                 {item.check_out && (
                   <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1 mt-1 border border-gray-100">
                     <div className="flex justify-between items-center">
