@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import { db } from "../services/firebase";
 import { Device } from "@capacitor/device";
 import {
-  collection,
+  collectionGroup, // KUNCI UTAMA: Menggantikan collection biasa
   query,
   where,
   getDocs,
@@ -69,14 +69,17 @@ export const AuthProvider = ({ children }) => {
   const login = async (nip, password) => {
     try {
       setGlobalLoading(true);
-      // Baca selalu dari Root untuk keamanan login
-      const usersRef = collection(db, "users");
-      const q = query(
-        usersRef,
+
+      // ==========================================
+      // PERBAIKAN 1: MENGGUNAKAN COLLECTION GROUP
+      // Mencari NIP di semua sub-koleksi "users" di seluruh sekolah
+      // ==========================================
+      const usersQuery = query(
+        collectionGroup(db, "users"),
         where("nip", "==", nip),
-        where("password", "==", password),
+        where("password", "==", password)
       );
-      const querySnapshot = await getDocs(q);
+      const querySnapshot = await getDocs(usersQuery);
 
       if (!querySnapshot.empty) {
         const userDoc = querySnapshot.docs[0];
@@ -97,44 +100,35 @@ export const AuthProvider = ({ children }) => {
             if (userData.device_id && userData.device_id !== localDeviceId) {
               setGlobalLoading(false);
               toast.error(
-                "Akses Ditolak! Akun Anda telah tertaut di perangkat lain.",
+                "Akses Ditolak! Akun Anda telah tertaut di perangkat lain."
               );
               return false;
             }
 
             // Aturan 2: Jika AKUN ini belum terikat, cek apakah HP ini milik orang lain
             if (!userData.device_id) {
-              // Cek di jalur Root apakah HP ini dipakai NIP lain
+              // Gunakan collectionGroup juga untuk memastikan HP ini tidak dipakai pegawai manapun
               const checkDeviceQuery = query(
-                collection(db, "users"),
-                where("device_id", "==", localDeviceId),
+                collectionGroup(db, "users"),
+                where("device_id", "==", localDeviceId)
               );
               const deviceSnap = await getDocs(checkDeviceQuery);
 
               if (!deviceSnap.empty) {
                 setGlobalLoading(false);
                 toast.error(
-                  "Akses Ditolak! HP ini sudah terdaftar untuk pegawai lain. 1 HP hanya untuk 1 Akun.",
+                  "Akses Ditolak! HP ini sudah terdaftar untuk pegawai lain. 1 HP hanya untuk 1 Akun."
                 );
                 return false;
               }
 
               // ==========================================
-              // ✅ PERBAIKAN KRUSIAL: SINKRONISASI GANDA
-              // Ikat ke perangkat ini dan simpan di KEDUA TEMPAT!
+              // PERBAIKAN 2: SINKRONISASI TUNGGAL (LEBIH AMAN & BERSIH)
+              // updateDoc pada userDoc.ref akan otomatis menunjuk ke sub-collection yang benar
+              // tanpa perlu membuat path manual `schools/{schoolId}/users/{nip}`
               // ==========================================
-              
-              // 1. Simpan ke Jalur Root (Untuk Autentikasi)
               await updateDoc(userDoc.ref, { device_id: localDeviceId });
               
-              // 2. Simpan ke Kamar Sub-Koleksi Sekolah (Untuk Data Dasbor Admin)
-              const subCollectionRef = doc(db, `schools/${userData.school_id}/users`, userDoc.id);
-              try {
-                await updateDoc(subCollectionRef, { device_id: localDeviceId });
-              } catch (e) {
-                console.warn("Peringatan: Gagal sync device ke sub-koleksi. Pastikan Migrasi Tahap 3 sukses.", e);
-              }
-
               userData.device_id = localDeviceId;
             }
           }

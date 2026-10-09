@@ -112,7 +112,7 @@ export default function AdminGuru() {
     XLSX.writeFile(wb, "Template_Import_Pegawai.xlsx");
   };
 
-  // IMPORT EXCEL (Disempurnakan)
+  // IMPORT EXCEL (OPTIMASI BATCH & SUB-COLLECTION)
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -124,22 +124,23 @@ export default function AdminGuru() {
         const bstr = evt.target.result;
         const wb = XLSX.read(bstr, { type: "binary" });
         const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-        if (data.length === 0) return toast.error("File Excel kosong!");
+        
+        if (data.length === 0) {
+          setIsImporting(false);
+          return toast.error("File Excel kosong!");
+        }
 
-        let successCount = 0,
-          failCount = 0;
-        const toastId = toast.loading(
-          `Mengimpor ${data.length} data... Mohon tunggu.`,
-        );
+        let failCount = 0;
+        const validTeachers = [];
 
+        // Kumpulkan semua data valid ke dalam array
         for (const row of data) {
-          // Amankan nama kolom (Bisa membaca NIP atau nip, Nama atau nama)
-          const nip = row.NIP || row.nip;
-          const nama = row.Nama || row.nama;
-          const password = row.Password || row.password;
+          // Amankan bacaan properti dengan huruf kapital atau kecil
+          const nip = row.NIP || row.nip || row.Nip;
+          const nama = row.Nama || row.nama || row.Name || row.name;
+          const password = row.Password || row.password || row.Pass || row.pass;
 
           if (nip && nama && password) {
-            // Amankan Role (Anti Typo)
             const roleInput = String(row.Role || row.role || "guru")
               .trim()
               .toLowerCase();
@@ -153,32 +154,42 @@ export default function AdminGuru() {
             )
               finalRole = "tendik";
 
-            const newTeacherData = {
+            validTeachers.push({
               nip: String(nip).trim(),
               name: String(nama).trim(),
               password: String(password).trim(),
               role: finalRole,
               school_id: user.school_id,
-            };
-            const result = await adminService.addTeacher(newTeacherData);
-            if (result.success) successCount++;
-            else failCount++;
-          } else failCount++;
+            });
+          } else {
+            failCount++;
+          }
         }
-        toast.dismiss(toastId);
-        if (successCount > 0) {
-          toast.success(`Berhasil impor ${successCount} data!`);
-          fetchTeachers();
+
+        // Tembakkan ke database dalam 1 kali Request (Atomic Batch)
+        if (validTeachers.length > 0) {
+          const toastId = toast.loading(`Mengimpor ${validTeachers.length} data... Mohon tunggu.`);
+          const result = await adminService.importTeachersBatch(validTeachers, user.school_id);
+          
+          toast.dismiss(toastId);
+          if (result.success) {
+            toast.success(`Berhasil impor ${result.count} data pegawai!`);
+            fetchTeachers();
+          } else {
+            toast.error(result.message || "Gagal mengimpor ke database.");
+          }
         }
-        if (failCount > 0)
-          toast.error(
-            `${failCount} data gagal diimpor (NIP Duplikat/Format Salah).`,
-          );
+
+        if (failCount > 0) {
+          toast.error(`${failCount} baris diabaikan (Data tidak lengkap / NIP kosong).`);
+        }
+
       } catch (error) {
+        console.error(error);
         toast.error("Gagal membaca file Excel.");
       } finally {
         setIsImporting(false);
-        e.target.value = null;
+        e.target.value = null; // Reset input agar bisa upload file yang sama lagi
       }
     };
     reader.readAsBinaryString(file);

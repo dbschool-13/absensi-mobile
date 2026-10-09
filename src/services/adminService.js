@@ -4,11 +4,14 @@ import {
   query,
   where,
   getDocs,
+  getDoc, // Tambahan untuk cek dokumen spesifik
   doc,
   setDoc,
   updateDoc,
   deleteDoc,
   getCountFromServer,
+  writeBatch, // Tambahan untuk Import Excel
+  serverTimestamp, // Tambahan untuk Timestamp
 } from "firebase/firestore";
 import { getTodayString } from "../utils/timeUtils";
 
@@ -19,11 +22,7 @@ export const adminService = {
       return { totalPegawai: 0, hadir: 0, belumHadir: 0, persentase: 0 };
 
     try {
-      // ==========================================
-      // OPTIMASI 1: MENGGUNAKAN getCountFromServer
-      // Menghitung jumlah pegawai secara instan di sisi server.
-      // Biaya: HANYA 1 Read.
-      // ==========================================
+      // Menghitung jumlah pegawai secara instan di sisi server (Cost: 1 Read)
       const validRoles = ["guru", "tendik", "kepsek"];
       const qUsers = query(
         collection(db, `schools/${schoolId}/users`),
@@ -33,11 +32,8 @@ export const adminService = {
       const userSnap = await getCountFromServer(qUsers);
       const totalPegawai = userSnap.data().count;
 
-      // ==========================================
       // Kueri Tarikan Absen Hari Ini
-      // (Aman dari kebocoran karena terfilter tanggal HARI INI saja)
-      // ==========================================
-      const today = getTodayString(); // Pastikan fungsi ini sudah terdefinisi/diimpor
+      const today = getTodayString(); 
       const qAtt = query(
         collection(db, `schools/${schoolId}/attendances`),
         where("date", "==", today),
@@ -46,9 +42,6 @@ export const adminService = {
 
       let hadir = 0;
 
-      // ==========================================
-      // PERBAIKAN LOGIKA HITUNG HADIR (AUTO-INJECT)
-      // ==========================================
       attSnap.forEach((doc) => {
         const att = doc.data();
         const isInject =
@@ -63,9 +56,9 @@ export const adminService = {
             statusVal === "izin_pribadi" ||
             statusVal.includes("izin"))
         ) {
-          return; // Skip (tidak dihitung hadir)
+          return; 
         }
-        hadir++; // Dihitung hadir (Hadir fisik ATAU Cuti jika aturan sekolah menganggapnya hadir)
+        hadir++;
       });
 
       const belumHadir = Math.max(totalPegawai - hadir, 0);
@@ -99,15 +92,13 @@ export const adminService = {
     }
   },
 
-  // 3. Ambil Data Rekap Bulanan (SUDAH DIOPTIMALISASI)
+  // 3. Ambil Data Rekap Bulanan
   getRekapData: async (schoolId, month, year) => {
     if (!schoolId) return [];
     try {
-      // Tentukan batas rentang teks tanggal untuk bulan yang diminta
       const startDate = `${year}-${month}-01`;
-      const endDate = `${year}-${month}-31`; // Pembacaan string Firestore aman menggunakan 31
+      const endDate = `${year}-${month}-31`; 
 
-      // Tarik hanya dokumen yang tanggalnya berada di dalam bulan tersebut
       const q = query(
         collection(db, `schools/${schoolId}/attendances`),
         where("date", ">=", startDate),
@@ -141,36 +132,28 @@ export const adminService = {
     }
   },
 
-  // 5. Tambah Pegawai Baru (Guru/Kepsek/Tendik)
+  // 5. Tambah Pegawai Baru (HANYA KE SUB-COLLECTION DENGAN ID = NIP)
   addTeacher: async (teacherData) => {
     try {
-      const q = query(
-        collection(db, "users"),
-        where("nip", "==", teacherData.nip),
-      );
-      const snap = await getDocs(q);
-
-      if (!snap.empty) {
-        return { success: false, message: "NIP sudah terdaftar!" };
+      const { nip, school_id } = teacherData;
+      
+      // Gunakan NIP sebagai nama dokumen agar terhindar dari duplikasi otomatis
+      const docRef = doc(db, `schools/${school_id}/users`, nip);
+      
+      // Cek apakah NIP sudah dipakai di sekolah ini (Cost: 1 Read)
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        return { success: false, message: "NIP tersebut sudah terdaftar di sistem!" };
       }
 
-      const newDocRef = doc(collection(db, "users"));
       const payload = {
         ...teacherData,
         role: teacherData.role || "guru",
         is_active: true,
+        created_at: serverTimestamp(),
       };
 
-      await setDoc(newDocRef, payload);
-
-      if (teacherData.school_id) {
-        const subCollectionRef = doc(
-          db,
-          `schools/${teacherData.school_id}/users`,
-          newDocRef.id,
-        );
-        await setDoc(subCollectionRef, payload);
-      }
+      await setDoc(docRef, payload);
 
       return { success: true, message: "Pegawai berhasil ditambahkan!" };
     } catch (error) {
@@ -179,12 +162,42 @@ export const adminService = {
     }
   },
 
-  // 6. Hapus Data Guru
+  // 5.B (FUNGSI BARU) IMPORT EXCEL MASSAL DENGAN BATCH
+  importTeachersBatch: async (teachersArray, schoolId) => {
+    if (!teachersArray || teachersArray.length === 0) return { success: false };
+    
+    try {
+      const batch = writeBatch(db);
+      
+      teachersArray.forEach((teacher) => {
+        // NIP dijadikan sebagai Document ID
+        const docRef = doc(db, `schools/${schoolId}/users`, teacher.nip);
+        batch.set(docRef, {
+          ...teacher,
+          is_active: true,
+          created_at: serverTimestamp()
+        });
+      });
+
+      // Commit semua data dalam 1 tembakan request (Atomic Batch)
+      await batch.commit();
+      return { success: true, count: teachersArray.length };
+    } catch (error) {
+      console.error("Error batch import:", error);
+      return { success: false, message: "Gagal melakukan impor massal ke database." };
+    }
+  },
+
+  // 6. Hapus Data Guru (HAPUS DARI SUB-COLLECTION)
   deleteTeacher: async (docId, schoolId) => {
     if (!docId || !schoolId) return false;
     try {
-      await deleteDoc(doc(db, "users", docId));
+      // Hapus dari Sub-Collection
       await deleteDoc(doc(db, `schools/${schoolId}/users`, docId));
+      
+      // Opsional (Fallback): Hapus dari koleksi global JIKA data tersebut masih sisa arsitektur lama
+      try { await deleteDoc(doc(db, "users", docId)); } catch (e) {}
+      
       return true;
     } catch (error) {
       console.error("Gagal menghapus guru:", error);
@@ -196,10 +209,14 @@ export const adminService = {
   resetDevice: async (docId, schoolId) => {
     if (!docId || !schoolId) return false;
     try {
-      await updateDoc(doc(db, "users", docId), { device_id: null });
+      // Reset dari Sub-Collection
       await updateDoc(doc(db, `schools/${schoolId}/users`, docId), {
         device_id: null,
       });
+
+      // Opsional (Fallback): Reset dari koleksi global JIKA data tersebut masih sisa arsitektur lama
+      try { await updateDoc(doc(db, "users", docId), { device_id: null }); } catch (e) {}
+      
       return true;
     } catch (error) {
       console.error("Gagal reset device:", error);

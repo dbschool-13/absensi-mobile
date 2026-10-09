@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { Lock, User } from "lucide-react";
@@ -19,13 +19,20 @@ export default function Login() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!nip || !password) {
+    
+    // Hilangkan spasi kosong di awal/akhir menggunakan trim()
+    const cleanNip = nip.trim();
+    const cleanPassword = password.trim();
+
+    if (!cleanNip || !cleanPassword) {
       toast.error("Harap isi NIP dan Password");
       return;
     }
 
     setIsSubmitting(true);
-    const success = await login(nip, password);
+    // Lempar data yang sudah bersih dari spasi ke AuthContext
+    const success = await login(cleanNip, cleanPassword);
+    
     if (success) {
       toast.success("Login Berhasil!");
       navigate("/dashboard");
@@ -42,7 +49,7 @@ export default function Login() {
           </div>
           <h1 className="text-2xl font-bold text-gray-800">Absensi Mobile</h1>
           <p className="text-gray-500 text-sm mt-1">
-            Sistem Kehadiran Guru & Karyawan
+            Sistem Kehadiran Pegawai
           </p>
         </div>
 
@@ -53,7 +60,7 @@ export default function Login() {
             </div>
             <input
               type="text"
-              placeholder="Nomor Induk Pegawai (NIP)"
+              placeholder="Nomor Induk Pegawai (NIP/NIK)"
               className="w-full pl-10 pr-4 py-3 bg-white/50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
               value={nip}
               onChange={(e) => setNip(e.target.value)}
