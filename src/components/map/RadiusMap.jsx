@@ -15,30 +15,47 @@ L.Icon.Default.mergeOptions({
   shadowUrl,
 });
 
-// Komponen Ganda: Auto-center kamera + Penyembuh Blank Abu-abu
-const MapUpdater = ({ center }) => {
+// Custom Icon Merah untuk Lokasi Pengguna
+const redUserIcon = L.divIcon({
+  className: "custom-red-marker",
+  html: `
+    <div style="
+      background-color: #5151f5; 
+      width: 20px; 
+      height: 20px; 
+      border-radius: 50%; 
+      border: 2px solid white; 
+      box-shadow: 0 3px 6px rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    ">
+      <div style="width: 8px; height: 8px; background-color: white; border-radius: 50%;"></div>
+    </div>
+  `,
+  iconSize: [28, 28],
+  iconAnchor: [14, 14],
+});
+
+// Komponen Inisialisasi: Hanya memperbaiki ukuran peta
+const MapInitializer = () => {
   const map = useMap();
 
   useEffect(() => {
-    // Beri jeda 100ms agar pop-up selesai merender, lalu paksa peta menyesuaikan ukuran
     const timer = setTimeout(() => {
       map.invalidateSize();
-      if (center[0] && center[1]) {
-        map.flyTo(center, 17, { animate: true }); // Terbang ke lokasi user
-      }
     }, 100);
-
     return () => clearTimeout(timer);
-  }, [center, map]);
+  }, [map]);
 
   return null;
 };
 
 export default function RadiusMap({
   userLat,
-  userLng, // DIPERBAIKI: Sebelumnya userLon
+  userLng,
   schoolLat,
-  schoolLng, // DIPERBAIKI: Sebelumnya schoolLon
+  schoolLng,
   radius,
 }) {
   if (!schoolLat || !schoolLng)
@@ -50,7 +67,6 @@ export default function RadiusMap({
   const userPos = userLat && userLng ? [userLat, userLng] : schoolPos;
 
   return (
-    // Bungkusan <div> yang bertabrakan dihilangkan, langsung me-return MapContainer
     <MapContainer
       center={schoolPos}
       zoom={17}
@@ -73,10 +89,10 @@ export default function RadiusMap({
         radius={Number(radius) || 60}
       />
 
-      {/* Marker Lokasi User */}
-      {userLat && userLng && <Marker position={userPos} />}
+      {/* Marker Titik Lokasi User (Hanya ini yang tampil) */}
+      {userLat && userLng && <Marker position={userPos} icon={redUserIcon} />}
 
-      <MapUpdater center={userPos} />
+      <MapInitializer />
     </MapContainer>
   );
 }

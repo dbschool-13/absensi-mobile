@@ -59,7 +59,7 @@ const getWorkingWeeks = (
   return weeks;
 };
 
-// Helper aman memformat waktu, langsung menerima label izin dari logika utama
+// Helper aman memformat waktu
 const formatTimeSafe = (timeData, injectLabel) => {
   if (!timeData) return "--:--";
 
@@ -160,7 +160,6 @@ export default function Riwayat() {
           ),
         );
 
-        // history digunakan PUSAT KALKULASI (berisi rentang minggu aktif)
         const absensiAktif = uniqueAttendances.filter((att) =>
           allValidDates.has(att.date),
         );
@@ -176,8 +175,7 @@ export default function Riwayat() {
   }, [user, availableWeeks]);
 
   // ============================================================
-  // KALKULASI METRIK (Total Jam, Kehadiran %, Kinerja %)
-  // Menggunakan data 'history' yang sinkron dengan Admin Rekap
+  // KALKULASI METRIK
   // ============================================================
   const summary = useMemo(() => {
     let countHadir = 0;
@@ -224,8 +222,7 @@ export default function Riwayat() {
   }, [history, totalHariKerjaBulanIni]);
 
   // ============================================================
-  // FILTER VISUAL (HANYA UNTUK TAMPILAN DAFTAR RIWAYAT)
-  // Menyingkirkan tanggal dari bulan berbeda yang ikut terbawa
+  // FILTER VISUAL
   // ============================================================
   const displayHistory = useMemo(() => {
     const targetPrefix = `${selectedYear}-${selectedMonth}`;
@@ -288,11 +285,8 @@ export default function Riwayat() {
         </div>
       </div>
 
-      {/* ======================================================== */}
-      {/* SUMMARY STATS (METRIK REKAP) SECTION */}
-      {/* ======================================================== */}
+      {/* SUMMARY STATS SECTION */}
       <div className="px-5 mt-5 grid grid-cols-3 gap-3">
-        {/* Total Jam */}
         <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex flex-col items-center justify-center shadow-sm">
           <Clock size={20} className="text-indigo-500 mb-1" />
           <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wide text-center">
@@ -302,7 +296,6 @@ export default function Riwayat() {
             {summary.totalJamDisplay}
           </span>
         </div>
-        {/* Kehadiran */}
         <div className="bg-teal-50 border border-teal-100 rounded-2xl p-4 flex flex-col items-center justify-center shadow-sm">
           <CalendarCheck size={20} className="text-teal-500 mb-1" />
           <span className="text-[10px] text-teal-400 font-bold uppercase tracking-wide text-center">
@@ -312,7 +305,6 @@ export default function Riwayat() {
             {summary.persentaseKehadiran}%
           </span>
         </div>
-        {/* Kinerja */}
         <div className="bg-sky-50 border border-sky-100 rounded-2xl p-4 flex flex-col items-center justify-center shadow-sm">
           <Target size={20} className="text-sky-500 mb-1" />
           <span className="text-[10px] text-sky-400 font-bold uppercase tracking-wide text-center">
@@ -444,9 +436,9 @@ export default function Riwayat() {
                   </div>
                 </div>
 
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center border border-emerald-100">
+                <div className="flex justify-between items-start">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center border border-emerald-100 mt-1">
                       <Clock size={16} className="text-emerald-500" />
                     </div>
                     <div>
@@ -456,11 +448,19 @@ export default function Riwayat() {
                       <p className="font-bold text-gray-800">
                         {formatTimeSafe(item.check_in?.time, badgeLabel)}
                       </p>
+                      {/* ======================================= */}
+                      {/* LABEL TERLAMBAT (BARU) */}
+                      {/* ======================================= */}
+                      {item.is_late && !isAutoInject && (
+                        <p className="text-[10px] font-bold text-orange-500 mt-0.5">
+                          Terlambat
+                        </p>
+                      )}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center border border-red-100">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center border border-red-100 mt-1">
                       <Clock size={16} className="text-red-500" />
                     </div>
                     <div>

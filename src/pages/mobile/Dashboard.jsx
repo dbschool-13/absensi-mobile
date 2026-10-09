@@ -104,7 +104,6 @@ export default function Dashboard() {
     fetchTodayAtt();
   }, [user]);
 
-  // KODE BARU UNTUK fetchWeeklyData di Dashboard.jsx
   useEffect(() => {
     const fetchWeeklyData = async () => {
       if (!user || isOffline) return;
@@ -113,11 +112,9 @@ export default function Dashboard() {
         const endOfWk = endOfWeek(currentTime, { weekStartsOn: 1 });
         const todayStr = format(currentTime, "yyyy-MM-dd");
 
-        // Format tanggal untuk query
         const startStr = format(startOfWk, "yyyy-MM-dd");
         const endStr = format(endOfWk, "yyyy-MM-dd");
 
-        // OPTIMALISASI QUERY: Hanya tarik data rentang minggu ini saja! (Maks 7 dokumen)
         const q = query(
           collection(db, `schools/${user.school_id}/attendances`),
           where("user_id", "==", user.nip),
@@ -192,16 +189,13 @@ export default function Dashboard() {
     setGlobalLoading(true);
 
     try {
-      // Eksekusi seluruh antrean sekaligus lewat metode Batch
       const isSuccess = await attendanceService.syncOfflineBatch(queue);
 
       if (isSuccess) {
         toast.success(`${queue.length} data absen offline terkirim!`);
-        // Kosongkan antrean lokal
         localStorage.removeItem("offline_attendance");
         setPendingSync(0);
 
-        // Segarkan data dashboard
         const attData = await attendanceService.getTodayAttendance(
           user.nip,
           user.school_id,
@@ -554,22 +548,30 @@ export default function Dashboard() {
               <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
                 Masuk
               </span>
-              <p className="text-2xl font-bold text-gray-800">
-                {isAutoInject ? (
-                  <span className="text-base text-emerald-600">
-                    {leaveLabel}
+              <div className="flex flex-col items-center">
+                <p className="text-lg font-bold text-gray-800">
+                  {isAutoInject ? (
+                    <span className="text-base text-emerald-600">
+                      {leaveLabel}
+                    </span>
+                  ) : hasCheckedIn ? (
+                    format(
+                      todayAtt.check_in.time?.toDate
+                        ? todayAtt.check_in.time.toDate()
+                        : new Date(todayAtt.check_in.time),
+                      "HH:mm",
+                    )
+                  ) : (
+                    "--:--"
+                  )}
+                </p>
+                {/* LABEL TERLAMBAT (BARU) */}
+                {todayAtt?.is_late && !isAutoInject && (
+                  <span className="text-[10px] font-bold text-orange-500 mt-0.5">
+                    Terlambat
                   </span>
-                ) : hasCheckedIn ? (
-                  format(
-                    todayAtt.check_in.time?.toDate
-                      ? todayAtt.check_in.time.toDate()
-                      : new Date(todayAtt.check_in.time),
-                    "HH:mm",
-                  )
-                ) : (
-                  "--:--"
                 )}
-              </p>
+              </div>
             </div>
           </div>
 
@@ -586,22 +588,30 @@ export default function Dashboard() {
               <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
                 Pulang
               </span>
-              <p className="text-2xl font-bold text-gray-800">
-                {isAutoInject ? (
-                  <span className="text-base text-emerald-600">
-                    {leaveLabel}
+              <div className="flex flex-col items-center">
+                <p className="text-lg font-bold text-gray-800">
+                  {isAutoInject ? (
+                    <span className="text-base text-emerald-600">
+                      {leaveLabel}
+                    </span>
+                  ) : hasCheckedOut ? (
+                    format(
+                      todayAtt.check_out.time?.toDate
+                        ? todayAtt.check_out.time.toDate()
+                        : new Date(todayAtt.check_out.time),
+                      "HH:mm",
+                    )
+                  ) : (
+                    "--:--"
+                  )}
+                </p>
+                {/* Spacer tak terlihat agar card sama tingginya dengan card Masuk jika ada label terlambat */}
+                {todayAtt?.is_late && !isAutoInject && (
+                  <span className="text-[10px] font-bold opacity-0 mt-0.5 select-none">
+                    -
                   </span>
-                ) : hasCheckedOut ? (
-                  format(
-                    todayAtt.check_out.time?.toDate
-                      ? todayAtt.check_out.time.toDate()
-                      : new Date(todayAtt.check_out.time),
-                    "HH:mm",
-                  )
-                ) : (
-                  "--:--"
                 )}
-              </p>
+              </div>
             </div>
           </div>
         </div>
@@ -871,7 +881,7 @@ export default function Dashboard() {
                 className={`flex-1 py-3 rounded-xl font-semibold text-white flex items-center justify-center gap-2 ${
                   isSaving
                     ? "bg-gray-400 opacity-80"
-                    : "bg-emerald-500 hover:bg-indigo-700 active:scale-95"
+                    : "bg-emerald-500 hover:bg-emerald-600 active:scale-95"
                 }`}
               >
                 {isSaving ? (
@@ -901,10 +911,18 @@ export default function Dashboard() {
               {successModal.type === "datang" ? "Absen Masuk" : "Absen Pulang"}
             </h3>
 
-            <div className="bg-gray-50 px-5 py-2 rounded-lg mb-4 mt-2 border border-gray-100">
+            <div className="bg-gray-50 px-5 py-2 rounded-lg mb-2 mt-2 border border-gray-100 flex flex-col items-center">
               <p className="text-2xl font-black text-emerald-600">
                 {successModal.time}
               </p>
+              {/* ======================================= */}
+              {/* LABEL TERLAMBAT PADA SUCCESS MODAL       */}
+              {/* ======================================= */}
+              {successModal.type === "datang" && todayAtt?.is_late && !isAutoInject && (
+                <span className="mt-1 text-[10px] font-bold px-2 py-0.5 bg-orange-100 text-orange-600 rounded-md border border-orange-200 animate-pulse">
+                  Terlambat
+                </span>
+              )}
             </div>
 
             <p className="text-xs text-gray-500 mb-6">

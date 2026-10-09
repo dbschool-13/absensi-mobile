@@ -42,18 +42,15 @@ export default function AdminMonitoring() {
   }, [user]);
 
   useEffect(() => {
-    // 1. Return awal jika school_id belum siap (mencegah query error)
     if (!user?.school_id) return;
 
     const today = format(new Date(), "yyyy-MM-dd");
 
-    // 2. Query sudah sangat optimal: Terkunci di Sub-Koleksi dan Tanggal Hari Ini
     const q = query(
       collection(db, `schools/${user.school_id}/attendances`),
       where("date", "==", today)
     );
 
-    // 3. Tambahkan penanganan error di parameter ketiga onSnapshot
     const unsubscribe = onSnapshot(
       q, 
       (snapshot) => {
@@ -65,19 +62,12 @@ export default function AdminMonitoring() {
       },
       (error) => {
         console.error("Terjadi kesalahan pada Live Listener Absensi:", error);
-        // Bisa tambahkan toast.error disini jika ingin memberi tahu Admin
       }
     );
 
-    // 4. Bersihkan memori saat Admin berpindah halaman
     return () => unsubscribe();
-    
-    // 5. OPTIMASI: Bergantung murni pada school_id, bukan seluruh objek user
   }, [user?.school_id]);
 
-  // ==========================================================
-  // PERBAIKAN 2: Logika Pembacaan Auto-Inject Arsitektur Baru
-  // ==========================================================
   const monitoringData = teachers
     .map((guru) => {
       const absenHariIni = realtimeAtt.find((att) => att.user_id === guru.nip);
@@ -89,7 +79,6 @@ export default function AdminMonitoring() {
         isAutoInject =
           absenHariIni.is_auto_injected === true ||
           absenHariIni.check_in?.time === "[AUTO-INJECT]";
-        // Dianggap "Ada Kejelasan Status" jika absen fisik atau disuntik izin
         isHadir = !!absenHariIni.check_in || isAutoInject;
       }
 
@@ -101,11 +90,9 @@ export default function AdminMonitoring() {
       };
     })
     .sort((a, b) => {
-      // Urutkan: Yang sudah hadir/izin di atas, yang belum datang di bawah
       if (a.isHadirRecord && !b.isHadirRecord) return -1;
       if (!a.isHadirRecord && b.isHadirRecord) return 1;
 
-      // Jika keduanya ada record, urutkan berdasarkan jam datang (jika ada)
       if (
         a.isHadirRecord &&
         b.isHadirRecord &&
@@ -121,15 +108,11 @@ export default function AdminMonitoring() {
 
   const totalPegawai = teachers.length;
 
-  // ==========================================================
-  // PERBAIKAN 3: Hitung "Sudah Hadir" Berdasarkan Status Baru
-  // ==========================================================
   const totalHadir = realtimeAtt.filter((att) => {
     const isInject =
       att.is_auto_injected === true || att.check_in?.time === "[AUTO-INJECT]";
     const statusVal = (att.status || "").toLowerCase();
 
-    // Jangan hitung sebagai hadir jika statusnya Sakit atau Izin Pribadi (0 Jam Kerja)
     if (
       isInject &&
       (statusVal === "sakit" ||
@@ -256,9 +239,6 @@ export default function AdminMonitoring() {
 
                   if (att) {
                     if (isAutoInject) {
-                      // ==========================================================
-                      // PERBAIKAN 4: Cek Jenis Izin Berdasarkan Field "status"
-                      // ==========================================================
                       if (statusVal === "cuti") {
                         statusBadge = (
                           <span className="bg-purple-100 text-purple-600 px-3 py-1.5 rounded-full text-xs font-bold border border-purple-200">
@@ -293,7 +273,6 @@ export default function AdminMonitoring() {
                           </span>
                         );
                       } else {
-                        // Fallback dinamis
                         const fallbackLabel =
                           statusVal
                             .split("_")
@@ -353,19 +332,32 @@ export default function AdminMonitoring() {
                             : "Guru"}
                         </p>
                       </td>
+                      
+                      {/* ======================================= */}
+                      {/* PERBAIKAN: KOLOM JAM DATANG + TERLAMBAT */}
+                      {/* ======================================= */}
                       <td className="p-5 text-center">
-                        <span
-                          className={`font-bold ${
-                            isAutoInject && inTime === "--:--"
-                              ? "text-orange-500"
-                              : isHadir || isAutoInject
-                              ? "text-emerald-600"
-                              : "text-gray-300 font-medium"
-                          }`}
-                        >
-                          {inTime}
-                        </span>
+                        <div className="flex flex-col items-center gap-1">
+                          <span
+                            className={`font-bold ${
+                              isAutoInject && inTime === "--:--"
+                                ? "text-orange-500"
+                                : isHadir || isAutoInject
+                                ? "text-emerald-600"
+                                : "text-gray-300 font-medium"
+                            }`}
+                          >
+                            {inTime}
+                          </span>
+                          {/* Label Terlambat */}
+                          {att?.is_late && !isAutoInject && (
+                            <span className="text-[10px] font-bold text-orange-500">
+                              Terlambat
+                            </span>
+                          )}
+                        </div>
                       </td>
+
                       <td className="p-5 text-center">
                         <div className="flex flex-col items-center gap-1">
                           <span

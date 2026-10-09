@@ -46,7 +46,6 @@ export default function KepsekMonitoring() {
     if (user?.school_id) {
       const today = format(new Date(), "yyyy-MM-dd");
 
-      // PERBAIKAN 1: Membaca ke sub-koleksi spesifik sekolah
       const q = query(
         collection(db, `schools/${user.school_id}/attendances`),
         where("date", "==", today),
@@ -64,7 +63,6 @@ export default function KepsekMonitoring() {
     }
   }, [user]);
 
-  // PERBAIKAN 2: Logika Deteksi Hadir & Auto-Inject
   const monitoringData = teachers
     .map((guru) => {
       const absenHariIni = realtimeAtt.find((att) => att.user_id === guru.nip);
@@ -108,7 +106,6 @@ export default function KepsekMonitoring() {
   );
 
   const totalPegawai = teachers.length;
-  // Menghitung status hadir yang sebenarnya (tidak memasukkan yang berstatus izin 0 jam/sakit)
   const totalHadir = realtimeAtt.filter((att) => {
     const isInject =
       att.is_auto_injected === true || att.check_in?.time === "[AUTO-INJECT]";
@@ -231,7 +228,6 @@ export default function KepsekMonitoring() {
               let outTime = "--:--";
               let isTargetMet = false;
 
-              // PERBAIKAN 3: Menyusun data kartu berdasarkan jenis izin (arsitektur baru)
               if (att) {
                 if (isAutoInject) {
                   const statusVal = (att.status || "").toLowerCase();
@@ -350,6 +346,14 @@ export default function KepsekMonitoring() {
                       >
                         {inTime}
                       </p>
+                      {/* ======================================= */}
+                      {/* LABEL TERLAMBAT (BARU) */}
+                      {/* ======================================= */}
+                      {att?.is_late && !isAutoInject && (
+                        <p className="text-[9px] font-bold text-orange-500 mt-0.5">
+                          Terlambat
+                        </p>
+                      )}
                     </div>
                     <div className="w-[1px] bg-gray-100"></div>
                     <div className="flex-1">

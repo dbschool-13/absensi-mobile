@@ -38,14 +38,17 @@ export default function AdminSetting() {
   const [formData, setFormData] = useState({
     name: "",
     logo_url: "",
-    working_days: [1, 2, 3, 4, 5], // Default Senin-Jumat
-    holidays: [], // Format: [{ date: '2026-08-17', description: 'HUT RI' }]
+    working_days: [1, 2, 3, 4, 5], 
+    holidays: [], 
     latitude: "",
     longitude: "",
     radius_meters: 50,
+    enable_device_binding: false,
+    enable_late_status: false, // BARU: Status aktif/tidaknya fitur terlambat
     time_rules: {
       check_in_start: "",
       check_in_end: "",
+      late_threshold: "", // BARU: Batas jam terlambat
       check_out_start: "",
       check_out_end: "",
     },
@@ -71,12 +74,14 @@ export default function AdminSetting() {
             working_days: data.working_days || [1, 2, 3, 4, 5],
             holidays: data.holidays || [],
             enable_device_binding: data.enable_device_binding || false,
+            enable_late_status: data.enable_late_status || false,
             latitude: data.latitude || "",
             longitude: data.longitude || "",
             radius_meters: data.radius_meters || 50,
             time_rules: data.time_rules || {
               check_in_start: "06:00",
               check_in_end: "07:30",
+              late_threshold: "07:15",
               check_out_start: "15:00",
               check_out_end: "18:00",
             },
@@ -108,7 +113,6 @@ export default function AdminSetting() {
     setFormData((prev) => {
       const currentDays = prev.working_days;
       if (currentDays.includes(dayId)) {
-        // Hapus hari jika sudah ada (kecuali jika itu hari terakhir yang tersisa)
         if (currentDays.length === 1) {
           toast.error("Minimal harus ada 1 hari kerja!");
           return prev;
@@ -118,7 +122,6 @@ export default function AdminSetting() {
           working_days: currentDays.filter((d) => d !== dayId),
         };
       } else {
-        // Tambahkan hari dan urutkan
         return {
           ...prev,
           working_days: [...currentDays, dayId].sort((a, b) => a - b),
@@ -134,7 +137,6 @@ export default function AdminSetting() {
       return;
     }
 
-    // Cek apakah tanggal sudah ada
     const isExist = formData.holidays.some((h) => h.date === holidayInput.date);
     if (isExist) {
       toast.error("Tanggal ini sudah masuk di daftar libur!");
@@ -149,10 +151,10 @@ export default function AdminSetting() {
           date: holidayInput.date,
           description: holidayInput.description || "Libur Nasional",
         },
-      ].sort((a, b) => a.date.localeCompare(b.date)), // Urutkan dari tanggal terlama
+      ].sort((a, b) => a.date.localeCompare(b.date)), 
     }));
 
-    setHolidayInput({ date: "", description: "" }); // Reset input
+    setHolidayInput({ date: "", description: "" });
   };
 
   // Handler Hapus Hari Libur
@@ -354,7 +356,7 @@ export default function AdminSetting() {
           </div>
         </div>
 
-        {/* 4. Waktu Absensi */}
+        {/* 4. Waktu Absensi & Batas Terlambat */}
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4">
           <div className="flex items-center gap-3 border-b border-gray-50 pb-4 mb-4">
             <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
@@ -424,6 +426,51 @@ export default function AdminSetting() {
               </div>
             </div>
           </div>
+
+          {/* =================================================== */}
+          {/* FITUR BARU: TOGGLE & INPUT STATUS TERLAMBAT */}
+          {/* =================================================== */}
+          <div className="mt-6 pt-4 border-t border-gray-100">
+            <div className="flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-100">
+              <div>
+                <p className="font-bold text-gray-800 text-sm">
+                  Indikator Terlambat
+                </p>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Tandai "Terlambat" jika melewati jam tertentu.
+                </p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={formData.enable_late_status}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      enable_late_status: e.target.checked,
+                    })
+                  }
+                />
+                <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
+              </label>
+            </div>
+
+            {formData.enable_late_status && (
+              <div className="mt-3 animate-[flyIn_0.2s_ease-out]">
+                <label className="block text-[10px] text-gray-400 font-bold mb-1 uppercase">
+                  Batas Waktu Toleransi (Mulai Dihitung Terlambat)
+                </label>
+                <input
+                  type="time"
+                  name="late_threshold"
+                  value={formData.time_rules.late_threshold}
+                  onChange={handleTimeChange}
+                  className="w-full bg-orange-50/50 border border-orange-200 text-orange-700 font-bold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-200"
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* 6. Sistem Keamanan (Device Binding) */}
@@ -453,7 +500,6 @@ export default function AdminSetting() {
               </p>
             </div>
 
-            {/* Toggle Switch */}
             <label className="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"
@@ -486,7 +532,6 @@ export default function AdminSetting() {
             kewajiban hadir (tidak mengurangi persentase kehadiran).
           </p>
 
-          {/* Form Tambah Libur */}
           <div className="flex flex-col md:flex-row gap-3">
             <input
               type="date"
@@ -516,7 +561,6 @@ export default function AdminSetting() {
             </button>
           </div>
 
-          {/* List Hari Libur */}
           <div className="mt-6">
             {formData.holidays.length === 0 ? (
               <div className="text-center py-6 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-gray-400 text-sm font-medium">

@@ -9,7 +9,7 @@ import {
   setDoc,
   updateDoc,
   serverTimestamp,
-  writeBatch, // <-- WAJIB DITAMBAHKAN
+  writeBatch,
 } from "firebase/firestore";
 import { getTodayString, calculateWorkHours } from "../utils/timeUtils";
 import toast from "react-hot-toast";
@@ -47,12 +47,11 @@ const getAbsoluteTrueTime = async (fallbackTime) => {
 };
 
 export const attendanceService = {
-  // 1. Ambil status absen hari ini (DITAMBAH SCHOOL ID)
+  // 1. Ambil status absen hari ini
   getTodayAttendance: async (userId, schoolId) => {
     if (!schoolId) return null;
     try {
       const docId = `${userId}_${getTodayString()}`;
-      // PERUBAHAN PATH SUB-KOLEKSI
       const docRef = doc(db, `schools/${schoolId}/attendances`, docId);
       const docSnap = await getDoc(docRef);
 
@@ -66,14 +65,14 @@ export const attendanceService = {
     }
   },
 
-  // 2. Proses Absen Datang
+  // 2. Proses Absen Datang (DIPERBARUI: DETEKSI TERLAMBAT)
   checkIn: async (
     userId,
     schoolId,
     latitude,
     longitude,
     distance,
-    photoUrl, // Placeholder
+    photoUrl,
     clientTimestamp = new Date().toISOString(),
     isOfflineSync = false,
   ) => {
@@ -85,6 +84,26 @@ export const attendanceService = {
 
       const absoluteDateObj = new Date(finalTimeStr);
       const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
+      const currentTimeStr = format(absoluteDateObj, "HH:mm"); // Format HH:mm (cth: 07:16)
+
+      // ==========================================
+      // LOGIKA PENGECEKAN BATAS TERLAMBAT
+      // ==========================================
+      let isLate = false;
+      try {
+        const schoolSnap = await getDoc(doc(db, "schools", schoolId));
+        if (schoolSnap.exists()) {
+          const sData = schoolSnap.data();
+          if (sData.enable_late_status && sData.time_rules?.late_threshold) {
+            // Bandingkan string waktu (cth: "07:16" > "07:15" -> true)
+            if (currentTimeStr > sData.time_rules.late_threshold) {
+              isLate = true;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Gagal mengecek aturan terlambat", err);
+      }
 
       const docId = `${userId}_${trueDateStr}`;
       const docRef = doc(db, `schools/${schoolId}/attendances`, docId);
@@ -99,7 +118,9 @@ export const attendanceService = {
           longitude,
           distance_meters: distance,
           device_info: navigator.userAgent,
+          is_late: isLate, // Penanda terlambat di objek check_in
         },
+        is_late: isLate, // Penanda terlambat di root dokumen (untuk mempermudah filter rekap)
         check_out: null,
         total_hours: 0,
         status: "Belum Pulang",
@@ -140,7 +161,6 @@ export const attendanceService = {
       const docId = `${userId}_${trueDateStr}`;
       const docRef = doc(db, `schools/${schoolId}/attendances`, docId);
 
-      // Pengaman kebal string [AUTO-INJECT] di level service
       let checkInDate;
       if (checkInTime === "[AUTO-INJECT]") {
         checkInDate = absoluteDateObj;
@@ -175,7 +195,7 @@ export const attendanceService = {
     }
   },
 
-  // 4. Ambil Riwayat Absen (OPTIMALISASI KUOTA)
+  // 4. Ambil Riwayat Absen
   getHistory: async (userId, schoolId, month, year) => {
     if (!schoolId) return [];
     try {
@@ -204,22 +224,39 @@ export const attendanceService = {
   },
 
   // ==========================================
-  // 5. SINKRONISASI OFFLINE BATCH (OPTIMASI BIAYA & BATERAI)
+  // 5. SINKRONISASI OFFLINE BATCH (DIPERBARUI)
   // ==========================================
   syncOfflineBatch: async (queueData) => {
     if (!queueData || queueData.length === 0) return true;
 
     try {
       const batch = writeBatch(db);
+      const schoolCache = {}; // Cache agar tidak menarik data sekolah yang sama berulang kali
 
-      queueData.forEach((data) => {
+      // Gunakan for...of karena ada proses await di dalamnya
+      for (const data of queueData) {
         const absoluteDateObj = new Date(data.timestamp);
         const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
+        const currentTimeStr = format(absoluteDateObj, "HH:mm");
         const docId = `${data.nip}_${trueDateStr}`;
         const docRef = doc(db, `schools/${data.school_id}/attendances`, docId);
 
         if (data.type === "datang") {
-          // Logika CheckIn
+          
+          // Ambil aturan sekolah dan simpan ke Cache
+          if (!schoolCache[data.school_id]) {
+            const sSnap = await getDoc(doc(db, "schools", data.school_id));
+            schoolCache[data.school_id] = sSnap.exists() ? sSnap.data() : null;
+          }
+          const sData = schoolCache[data.school_id];
+          let isLate = false;
+
+          if (sData?.enable_late_status && sData?.time_rules?.late_threshold) {
+            if (currentTimeStr > sData.time_rules.late_threshold) {
+              isLate = true;
+            }
+          }
+
           batch.set(
             docRef,
             {
@@ -232,7 +269,9 @@ export const attendanceService = {
                 longitude: data.lng,
                 distance_meters: data.distance,
                 device_info: "Offline-Sync",
+                is_late: isLate,
               },
+              is_late: isLate,
               check_out: null,
               total_hours: 0,
               status: "Belum Pulang",
@@ -242,15 +281,13 @@ export const attendanceService = {
             { merge: true },
           );
         } else if (data.type === "pulang") {
-          // Logika CheckOut
           let checkInDate;
           if (data.checkInTime === "[AUTO-INJECT]") {
             checkInDate = absoluteDateObj;
           } else {
             checkInDate = data.checkInTime?.toDate
               ? data.checkInTime.toDate()
-              : new Date(data.checkInTime || absoluteDateObj); 
-              // Fallback terakhir dijamin tidak NaN
+              : new Date(data.checkInTime || absoluteDateObj);
           }
 
           const totalHours = calculateWorkHours(checkInDate, absoluteDateObj);
@@ -269,9 +306,8 @@ export const attendanceService = {
             server_updated_at: serverTimestamp(),
           });
         }
-      });
+      }
 
-      // Commit semua instruksi secara bersamaan (1 Request)
       await batch.commit();
       return true;
     } catch (error) {

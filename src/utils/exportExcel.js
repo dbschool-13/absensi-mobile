@@ -28,7 +28,7 @@ export const exportToExcel = async (
 
   let colIndex = 3;
   weekDates.forEach(() => {
-    worksheet.getColumn(colIndex).width = 12; // Jam Datang
+    worksheet.getColumn(colIndex).width = 14; // Jam Datang
     worksheet.getColumn(colIndex + 1).width = 12; // Jam Pulang
     colIndex += 2;
   });
@@ -131,7 +131,7 @@ export const exportToExcel = async (
       const cellDatang = row.getCell(cIndex);
       const cellPulang = row.getCell(cIndex + 1);
 
-      cellDatang.alignment = { vertical: "middle", horizontal: "center" };
+      cellDatang.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
       cellPulang.alignment = { vertical: "middle", horizontal: "center" };
 
       // Default font merah untuk kosong (strip) jika belum absen
@@ -164,7 +164,6 @@ export const exportToExcel = async (
                   .join(" ")
               : "Izin";
 
-          // Merge sel jam datang & pulang untuk menuliskan nama Izinnya di tengah
           worksheet.mergeCells(rowIndex, cIndex, rowIndex, cIndex + 1);
 
           cellDatang.value = leaveLabel;
@@ -172,18 +171,46 @@ export const exportToExcel = async (
         } else {
           // JIKA HADIR NORMAL DI SEKOLAH
           countHadir++;
+
+          // Tentukan apakah sudah melakukan absen pulang
+          const hasCheckedOut = !!absenHariIni.check_out?.time;
+          
+          // Tentukan apakah target jam kerja terpenuhi (>= 8 jam atau status Memenuhi Target)
           const isTargetMet =
             absenHariIni.status === "Memenuhi Target" ||
             absenHariIni.total_hours >= 8;
-          const colorArg = isTargetMet ? "FF008000" : "FFFF0000"; // Hijau jika tuntas, Merah jika kurang
 
-          cellDatang.font = { color: { argb: colorArg }, bold: true };
+          // ATUR WARNA BERDASARKAN STATUS PULANG & TARGET
+          let colorArg = "FF008000"; // Default Hijau
+          let datangColorArg = "FF008000";
+
+          if (!hasCheckedOut) {
+            // Belum absen pulang: Jam datang & label terlambat (jika ada) berwarna Oranye
+            datangColorArg = absenHariIni.is_late ? "FFFFA500" : "FF008000";
+            colorArg = "FFFF0000"; // Pulang masih strip (-) berwarna merah
+          } else if (!isTargetMet) {
+            // Sudah absen pulang tapi kurang jam kerja: Semua jadi Merah
+            datangColorArg = "FFFF0000";
+            colorArg = "FFFF0000";
+          } else {
+            // Sudah absen pulang dan memenuhi target: Semua jadi Hijau
+            datangColorArg = "FF008000";
+            colorArg = "FF008000";
+          }
+
+          cellDatang.font = { color: { argb: datangColorArg }, bold: true };
           cellPulang.font = { color: { argb: colorArg }, bold: true };
 
           if (absenHariIni.check_in?.time) {
             const jamMasukValid = getValidTime(absenHariIni.check_in.time);
             if (jamMasukValid) {
-              cellDatang.value = format(jamMasukValid, "HH:mm");
+              let timeStr = format(jamMasukValid, "HH:mm");
+              
+              if (absenHariIni.is_late) {
+                timeStr += "\n(Terlambat)";
+              }
+
+              cellDatang.value = timeStr;
             }
           }
 
@@ -253,7 +280,6 @@ export const exportToExcel = async (
   // ==========================================
   // BLOK TANDA TANGAN KEPALA SEKOLAH (EXCEL)
   // ==========================================
-  // Berikan jarak 3 baris kosong setelah tabel selesai
   const ttdStartRow = rowIndex + 3;
   const today = new Date();
   const monthsIndo = [
@@ -262,7 +288,6 @@ export const exportToExcel = async (
   ];
   const tglStr = `${String(today.getDate()).padStart(2, "0")} ${monthsIndo[today.getMonth()]} ${today.getFullYear()}`;
 
-  // Tentukan letak kolom tanda tangan (di pojok kanan tabel)
   const signCol = currentCell + 2; 
 
   const rowTgl = worksheet.getRow(ttdStartRow);
@@ -273,7 +298,6 @@ export const exportToExcel = async (
   rowJabatan.getCell(signCol).value = "Kepala Sekolah";
   rowJabatan.getCell(signCol).font = { size: 11 };
 
-  // Sisihkan 4 baris kosong untuk area tanda tangan basah
   const rowNama = worksheet.getRow(ttdStartRow + 5);
   rowNama.getCell(signCol).value = "Muhammad Kasim, S.Pd., M.Pd";
   rowNama.getCell(signCol).font = { bold: true, size: 11 };
