@@ -18,6 +18,8 @@ export const exportToExcel = async (
   weekDates,
   schoolName,
   weekLabel,
+  kepsekName,
+  kepsekNip
 ) => {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet("Rekap Mingguan");
@@ -172,28 +174,21 @@ export const exportToExcel = async (
           // JIKA HADIR NORMAL DI SEKOLAH
           countHadir++;
 
-          // Tentukan apakah sudah melakukan absen pulang
           const hasCheckedOut = !!absenHariIni.check_out?.time;
-          
-          // Tentukan apakah target jam kerja terpenuhi (>= 8 jam atau status Memenuhi Target)
           const isTargetMet =
             absenHariIni.status === "Memenuhi Target" ||
             absenHariIni.total_hours >= 8;
 
-          // ATUR WARNA BERDASARKAN STATUS PULANG & TARGET
           let colorArg = "FF008000"; // Default Hijau
           let datangColorArg = "FF008000";
 
           if (!hasCheckedOut) {
-            // Belum absen pulang: Jam datang & label terlambat (jika ada) berwarna Oranye
             datangColorArg = absenHariIni.is_late ? "FFFFA500" : "FF008000";
-            colorArg = "FFFF0000"; // Pulang masih strip (-) berwarna merah
+            colorArg = "FFFF0000";
           } else if (!isTargetMet) {
-            // Sudah absen pulang tapi kurang jam kerja: Semua jadi Merah
             datangColorArg = "FFFF0000";
             colorArg = "FFFF0000";
           } else {
-            // Sudah absen pulang dan memenuhi target: Semua jadi Hijau
             datangColorArg = "FF008000";
             colorArg = "FF008000";
           }
@@ -228,7 +223,6 @@ export const exportToExcel = async (
       cIndex += 2;
     });
 
-    // Kalkulasi Rekap Mingguan
     const targetJamSeminggu = weekDates.length * 8;
     const kekurangan = Math.max(targetJamSeminggu - totalJamKerja, 0);
     
@@ -240,31 +234,26 @@ export const exportToExcel = async (
       ? 0 
       : Math.min(Math.round((totalJamKerja / targetJamSeminggu) * 100), 100);
 
-    // Total Jam
     const totalCell = row.getCell(cIndex);
     totalCell.value = parseFloat(totalJamKerja.toFixed(1));
     totalCell.alignment = { vertical: "middle", horizontal: "center" };
     totalCell.font = { bold: true };
 
-    // Kekurangan Jam
     const kurangCell = row.getCell(cIndex + 1);
     kurangCell.value = kekurangan > 0 ? parseFloat(kekurangan.toFixed(1)) : 0;
     kurangCell.alignment = { vertical: "middle", horizontal: "center" };
     kurangCell.font = { color: { argb: "FFFF0000" }, bold: true };
 
-    // Persentase Kehadiran
     const hadirCell = row.getCell(cIndex + 2);
     hadirCell.value = `${persentaseKehadiran}%`;
     hadirCell.alignment = { vertical: "middle", horizontal: "center" };
     hadirCell.font = { bold: true };
 
-    // Persentase Kinerja
     const kinerjaCell = row.getCell(cIndex + 3);
     kinerjaCell.value = `${persentaseKinerja}%`;
     kinerjaCell.alignment = { vertical: "middle", horizontal: "center" };
     kinerjaCell.font = { bold: true };
 
-    // Terapkan border ke seluruh baris
     row.eachCell({ includeEmpty: true }, (cell) => {
       cell.border = {
         top: { style: "thin" },
@@ -299,11 +288,11 @@ export const exportToExcel = async (
   rowJabatan.getCell(signCol).font = { size: 11 };
 
   const rowNama = worksheet.getRow(ttdStartRow + 5);
-  rowNama.getCell(signCol).value = "Muhammad Kasim, S.Pd., M.Pd";
+  rowNama.getCell(signCol).value = kepsekName || ".......................";
   rowNama.getCell(signCol).font = { bold: true, size: 11 };
 
   const rowNip = worksheet.getRow(ttdStartRow + 6);
-  rowNip.getCell(signCol).value = "NIP. 19720319 199903 1 002";
+  rowNip.getCell(signCol).value = kepsekNip ? `NIP. ${kepsekNip}` : "NIP. .......................";
   rowNip.getCell(signCol).font = { size: 11 };
 
   // Export File

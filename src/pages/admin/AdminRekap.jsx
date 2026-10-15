@@ -225,13 +225,11 @@ export default function AdminRekap() {
         const teksKekurangan =
           selisihJamRaw > 0 ? `${kurangJam}j ${kurangMenit}m` : "Tuntas";
 
-        // KALKULASI 1: PERSENTASE KINERJA (BERDASARKAN TOTAL JAM)
         const persentaseKinerja =
           targetJam === 0
             ? 0
             : Math.min(Math.round((totalJamKerjaRaw / targetJam) * 100), 100);
 
-        // KALKULASI 2: PERSENTASE KEHADIRAN (BERDASARKAN KEHADIRAN FISIK)
         const countAlpa = Math.max(hariKerjaAktif - absensiAktif.length, 0);
         const persentaseKehadiran = 
           hariKerjaAktif === 0 
@@ -249,7 +247,7 @@ export default function AdminRekap() {
           totalJamKerja: parseFloat(totalJamKerjaRaw.toFixed(1)),
           teksKekurangan,
           persentase: persentaseKinerja, 
-          persentaseKehadiran: persentaseKehadiran // Disimpan untuk UI dan fungsi Export
+          persentaseKehadiran: persentaseKehadiran
         });
 
         if (targetWeek) {
@@ -273,9 +271,19 @@ export default function AdminRekap() {
     totalHariKerjaBulanIni,
   ]);
 
+  // Fungsi utilitas untuk mendapatkan data Kepsek
+  const getKepsekData = () => {
+    const kepsek = teachers.find((t) => t.role === "kepsek");
+    return {
+      kepsekName: kepsek ? kepsek.name : ".......................",
+      kepsekNip: kepsek ? kepsek.nip : ".......................",
+    };
+  };
+
   const handleExportPDF = () => {
     const monthLabel = months.find((m) => m.value === selectedMonth)?.label;
-    exportToPDF(rekapBulanan, schoolData?.name, monthLabel, selectedYear);
+    const { kepsekName, kepsekNip } = getKepsekData();
+    exportToPDF(rekapBulanan, schoolData?.name, monthLabel, selectedYear, kepsekName, kepsekNip);
   };
 
   const handleExportExcel = () => {
@@ -283,11 +291,14 @@ export default function AdminRekap() {
       (w) => w.id === parseInt(selectedWeek),
     );
     if (targetWeek) {
+      const { kepsekName, kepsekNip } = getKepsekData();
       exportToExcel(
         rekapMingguan,
         targetWeek.dates,
         schoolData?.name,
         targetWeek.label,
+        kepsekName,
+        kepsekNip
       );
     }
   };

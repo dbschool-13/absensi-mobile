@@ -1,7 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-export const exportToPDF = (rekapData, schoolName, monthLabel, year) => {
+export const exportToPDF = (rekapData, schoolName, monthLabel, year, kepsekName, kepsekNip) => {
   // Tetap menggunakan orientasi portrait ('p') dengan penyesuaian padding dan lebar sel 
   // agar 11 kolom masuk dengan rapi.
   const doc = new jsPDF("p", "mm", "a4");
@@ -70,16 +70,16 @@ export const exportToPDF = (rekapData, schoolName, monthLabel, year) => {
     },
     columnStyles: {
       0: { halign: "center", cellWidth: 10 },  // No
-      1: { cellWidth: 54 },                   // Nama & NIP
-      2: { halign: "center", cellWidth: 9 },  // H
-      3: { halign: "center", cellWidth: 9 },  // I
-      4: { halign: "center", cellWidth: 9 },  // S
-      5: { halign: "center", cellWidth: 9 },  // C
-      6: { halign: "center", cellWidth: 9 },  // A
-      7: { halign: "center", cellWidth: 18 }, // Total Jam
-      8: { halign: "center", cellWidth: 24 }, // Kekurangan
-      9: { halign: "center", cellWidth: 18 }, // Kehadiran
-      10: { halign: "center", cellWidth: 18 },// Kinerja
+      1: { cellWidth: 54 },                    // Nama & NIP
+      2: { halign: "center", cellWidth: 9 },   // H
+      3: { halign: "center", cellWidth: 9 },   // I
+      4: { halign: "center", cellWidth: 9 },   // S
+      5: { halign: "center", cellWidth: 9 },   // C
+      6: { halign: "center", cellWidth: 9 },   // A
+      7: { halign: "center", cellWidth: 18 },  // Total Jam
+      8: { halign: "center", cellWidth: 24 },  // Kekurangan
+      9: { halign: "center", cellWidth: 18 },  // Kehadiran
+      10: { halign: "center", cellWidth: 18 }, // Kinerja
     },
   });
 
@@ -115,9 +115,9 @@ export const exportToPDF = (rekapData, schoolName, monthLabel, year) => {
   
   // Ruang kosong untuk tanda tangan basah (sekitar 24 satuan)
   doc.setFont(undefined, "bold");
-  doc.text("Muhammad Kasim, S.Pd., M.Pd", ttdX, ttdY + 30);
+  doc.text(kepsekName || ".......................", ttdX, ttdY + 30);
   doc.setFont(undefined, "normal");
-  doc.text("NIP. 19720319 199903 1 002", ttdX, ttdY + 35);
+  doc.text(kepsekNip ? `NIP. ${kepsekNip}` : "NIP. .......................", ttdX, ttdY + 35);
 
   // Proses Download
   doc.save(`Rekap_Absen_${schoolName || "Sekolah"}_${monthLabel}_${year}.pdf`);
