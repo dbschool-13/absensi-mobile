@@ -14,6 +14,8 @@ import {
   Trash2,
   Calendar,
   ShieldCheck,
+  Sun,
+  Sunset,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
@@ -34,33 +36,43 @@ export default function AdminSetting() {
     { id: 6, label: "Sabtu" },
   ];
 
-  // State Form
+  // State Form (Struktur Multi-Sesi)
   const [formData, setFormData] = useState({
     name: "",
     logo_url: "",
-    working_days: [1, 2, 3, 4, 5], 
-    holidays: [], 
+    working_days: [1, 2, 3, 4, 5],
+    holidays: [],
     latitude: "",
     longitude: "",
     radius_meters: 50,
     enable_device_binding: false,
-    enable_late_status: false, // BARU: Status aktif/tidaknya fitur terlambat
     time_rules: {
-      check_in_start: "",
-      check_in_end: "",
-      late_threshold: "", // BARU: Batas jam terlambat
-      check_out_start: "",
-      check_out_end: "",
+      is_sesi_2_active: false,
+      sesi_1: {
+        check_in_start: "",
+        check_in_end: "",
+        late_threshold: "",
+        check_out_start: "",
+        check_out_end: "",
+        enable_late_status: false,
+      },
+      sesi_2: {
+        check_in_start: "",
+        check_in_end: "",
+        late_threshold: "",
+        check_out_start: "",
+        check_out_end: "",
+        enable_late_status: false,
+      },
     },
   });
 
-  // State Input Hari Libur Baru
   const [holidayInput, setHolidayInput] = useState({
     date: "",
     description: "",
   });
 
-  // Load Data Sekolah
+  // Load Data Sekolah & Migrasi Struktur Lama ke Struktur Sesi Baru
   useEffect(() => {
     const fetchSettings = async () => {
       if (user?.school_id) {
@@ -68,23 +80,40 @@ export default function AdminSetting() {
         const docSnap = await getDoc(doc(db, "schools", user.school_id));
         if (docSnap.exists()) {
           const data = docSnap.data();
+          const oldTimeRules = data.time_rules || {};
+          const hasSesi1 = !!oldTimeRules.sesi_1;
+
           setFormData({
             name: data.name || "",
             logo_url: data.logo_url || "",
             working_days: data.working_days || [1, 2, 3, 4, 5],
             holidays: data.holidays || [],
-            enable_device_binding: data.enable_device_binding || false,
-            enable_late_status: data.enable_late_status || false,
             latitude: data.latitude || "",
             longitude: data.longitude || "",
             radius_meters: data.radius_meters || 50,
-            time_rules: data.time_rules || {
-              check_in_start: "06:00",
-              check_in_end: "07:30",
-              late_threshold: "07:15",
-              check_out_start: "15:00",
-              check_out_end: "18:00",
-            },
+            enable_device_binding: data.enable_device_binding || false,
+            // Migrasi: Jika struktur baru belum ada, konversi data lama jadi Sesi 1
+            time_rules: hasSesi1
+              ? oldTimeRules
+              : {
+                  is_sesi_2_active: false,
+                  sesi_1: {
+                    check_in_start: oldTimeRules.check_in_start || "06:00",
+                    check_in_end: oldTimeRules.check_in_end || "07:30",
+                    check_out_start: oldTimeRules.check_out_start || "15:00",
+                    check_out_end: oldTimeRules.check_out_end || "18:00",
+                    enable_late_status: data.enable_late_status || false, // ambil dari struktur lama
+                    late_threshold: oldTimeRules.late_threshold || "07:15",
+                  },
+                  sesi_2: {
+                    check_in_start: "11:30",
+                    check_in_end: "14:30",
+                    check_out_start: "17:00",
+                    check_out_end: "20:00",
+                    enable_late_status: false,
+                    late_threshold: "12:30",
+                  },
+                },
           });
         }
         setLoading(false);
@@ -99,12 +128,17 @@ export default function AdminSetting() {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  // Handler Jam Absensi
-  const handleTimeChange = (e) => {
-    const { name, value } = e.target;
+  // Handler Jam Absensi Spesifik Sesi
+  const handleSessionTimeChange = (sessionKey, field, value) => {
     setFormData((prev) => ({
       ...prev,
-      time_rules: { ...prev.time_rules, [name]: value },
+      time_rules: {
+        ...prev.time_rules,
+        [sessionKey]: {
+          ...prev.time_rules[sessionKey],
+          [field]: value,
+        },
+      },
     }));
   };
 
@@ -130,18 +164,11 @@ export default function AdminSetting() {
     });
   };
 
-  // Handler Tambah Hari Libur
+  // Handler Tambah/Hapus Hari Libur
   const handleAddHoliday = () => {
-    if (!holidayInput.date) {
-      toast.error("Harap pilih tanggal libur!");
-      return;
-    }
-
-    const isExist = formData.holidays.some((h) => h.date === holidayInput.date);
-    if (isExist) {
-      toast.error("Tanggal ini sudah masuk di daftar libur!");
-      return;
-    }
+    if (!holidayInput.date) return toast.error("Harap pilih tanggal libur!");
+    if (formData.holidays.some((h) => h.date === holidayInput.date))
+      return toast.error("Tanggal ini sudah masuk di daftar libur!");
 
     setFormData((prev) => ({
       ...prev,
@@ -151,13 +178,11 @@ export default function AdminSetting() {
           date: holidayInput.date,
           description: holidayInput.description || "Libur Nasional",
         },
-      ].sort((a, b) => a.date.localeCompare(b.date)), 
+      ].sort((a, b) => a.date.localeCompare(b.date)),
     }));
-
     setHolidayInput({ date: "", description: "" });
   };
 
-  // Handler Hapus Hari Libur
   const handleRemoveHoliday = (dateStr) => {
     setFormData((prev) => ({
       ...prev,
@@ -169,10 +194,15 @@ export default function AdminSetting() {
   const handleSave = async () => {
     setSaving(true);
     const payload = {
-      ...formData,
+      name: formData.name,
+      logo_url: formData.logo_url,
+      working_days: formData.working_days,
+      holidays: formData.holidays,
       latitude: parseFloat(formData.latitude),
       longitude: parseFloat(formData.longitude),
       radius_meters: parseInt(formData.radius_meters),
+      enable_device_binding: formData.enable_device_binding,
+      time_rules: formData.time_rules, // Data multi-sesi masuk ke sini
     };
 
     const success = await adminService.updateSchoolSettings(
@@ -197,19 +227,19 @@ export default function AdminSetting() {
   return (
     <div className="p-8 max-w-5xl mx-auto space-y-6 pb-24">
       {/* HEADER */}
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-800 tracking-tight">
             Pengaturan Sistem
           </h1>
           <p className="text-gray-500 mt-1 font-medium">
-            Kelola identitas, waktu, dan lokasi absensi.
+            Kelola identitas, waktu sesi, dan lokasi absensi.
           </p>
         </div>
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-2 bg-primary text-white hover:bg-primary_dark px-6 py-3 rounded-xl font-bold transition-all shadow-lg shadow-primary/30 disabled:opacity-50"
+          className="flex items-center justify-center gap-2 bg-primary text-white hover:bg-primary_dark px-6 py-3 rounded-xl font-bold transition-all shadow-lg shadow-primary/30 disabled:opacity-50"
         >
           {saving ? (
             <span className="animate-pulse">Menyimpan...</span>
@@ -221,16 +251,18 @@ export default function AdminSetting() {
         </button>
       </div>
 
+      {/* GRID UTAMA - Lebih Terstruktur */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-        {/* 1. Identitas Sekolah */}
+        
+        {/* ======================================= */}
+        {/* BARIS 1: IDENTITAS & LOKASI             */}
+        {/* ======================================= */}
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4">
           <div className="flex items-center gap-3 border-b border-gray-50 pb-4 mb-4">
             <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
               <School size={20} />
             </div>
-            <h3 className="text-lg font-bold text-gray-800">
-              Identitas Sekolah
-            </h3>
+            <h3 className="text-lg font-bold text-gray-800">Identitas Sekolah</h3>
           </div>
           <div>
             <label className="block text-xs font-bold text-gray-500 uppercase mb-2">
@@ -270,15 +302,12 @@ export default function AdminSetting() {
           </div>
         </div>
 
-        {/* 2. Lokasi GPS & Radius */}
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4">
           <div className="flex items-center gap-3 border-b border-gray-50 pb-4 mb-4">
             <div className="p-2 bg-red-50 text-red-600 rounded-lg">
               <MapPin size={20} />
             </div>
-            <h3 className="text-lg font-bold text-gray-800">
-              Lokasi & Radius GPS
-            </h3>
+            <h3 className="text-lg font-bold text-gray-800">Lokasi & Radius GPS</h3>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -322,20 +351,16 @@ export default function AdminSetting() {
           </div>
         </div>
 
-        {/* 3. Sistem Hari Kerja (Multi-Select) */}
+        {/* ======================================= */}
+        {/* BARIS 2: HARI KERJA & KEAMANAN          */}
+        {/* ======================================= */}
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4">
           <div className="flex items-center gap-3 border-b border-gray-50 pb-4 mb-4">
             <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
               <CalendarDays size={20} />
             </div>
-            <h3 className="text-lg font-bold text-gray-800">
-              Hari Kerja Aktif
-            </h3>
+            <h3 className="text-lg font-bold text-gray-800">Hari Kerja Aktif</h3>
           </div>
-          <p className="text-sm text-gray-500 mb-4">
-            Klik untuk mengaktifkan atau menonaktifkan hari kerja.
-          </p>
-
           <div className="grid grid-cols-3 gap-3">
             {MASTER_DAYS.map((day) => {
               const isActive = formData.working_days.includes(day.id);
@@ -356,201 +381,258 @@ export default function AdminSetting() {
           </div>
         </div>
 
-        {/* 4. Waktu Absensi & Batas Terlambat */}
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4">
-          <div className="flex items-center gap-3 border-b border-gray-50 pb-4 mb-4">
-            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
-              <Clock size={20} />
-            </div>
-            <h3 className="text-lg font-bold text-gray-800">Waktu Absensi</h3>
-          </div>
-
-          <div className="grid grid-cols-2 gap-6">
-            <div className="space-y-3">
-              <p className="text-xs font-bold text-gray-500 uppercase">
-                Jam Datang
-              </p>
-              <div>
-                <label className="block text-[10px] text-gray-400 mb-1">
-                  Mulai Buka
-                </label>
-                <input
-                  type="time"
-                  name="check_in_start"
-                  value={formData.time_rules.check_in_start}
-                  onChange={handleTimeChange}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] text-gray-400 mb-1">
-                  Batas Akhir
-                </label>
-                <input
-                  type="time"
-                  name="check_in_end"
-                  value={formData.time_rules.check_in_end}
-                  onChange={handleTimeChange}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <p className="text-xs font-bold text-gray-500 uppercase">
-                Jam Pulang
-              </p>
-              <div>
-                <label className="block text-[10px] text-gray-400 mb-1">
-                  Mulai Buka
-                </label>
-                <input
-                  type="time"
-                  name="check_out_start"
-                  value={formData.time_rules.check_out_start}
-                  onChange={handleTimeChange}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] text-gray-400 mb-1">
-                  Batas Akhir
-                </label>
-                <input
-                  type="time"
-                  name="check_out_end"
-                  value={formData.time_rules.check_out_end}
-                  onChange={handleTimeChange}
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 outline-none"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* =================================================== */}
-          {/* FITUR BARU: TOGGLE & INPUT STATUS TERLAMBAT */}
-          {/* =================================================== */}
-          <div className="mt-6 pt-4 border-t border-gray-100">
-            <div className="flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-100">
-              <div>
-                <p className="font-bold text-gray-800 text-sm">
-                  Indikator Terlambat
-                </p>
-                <p className="text-[11px] text-gray-500 mt-0.5">
-                  Tandai "Terlambat" jika melewati jam tertentu.
-                </p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="sr-only peer"
-                  checked={formData.enable_late_status}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      enable_late_status: e.target.checked,
-                    })
-                  }
-                />
-                <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
-              </label>
-            </div>
-
-            {formData.enable_late_status && (
-              <div className="mt-3 animate-[flyIn_0.2s_ease-out]">
-                <label className="block text-[10px] text-gray-400 font-bold mb-1 uppercase">
-                  Batas Waktu Toleransi (Mulai Dihitung Terlambat)
-                </label>
-                <input
-                  type="time"
-                  name="late_threshold"
-                  value={formData.time_rules.late_threshold}
-                  onChange={handleTimeChange}
-                  className="w-full bg-orange-50/50 border border-orange-200 text-orange-700 font-bold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-200"
-                />
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 6. Sistem Keamanan (Device Binding) */}
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4 md:col-span-2">
           <div className="flex items-center gap-3 border-b border-gray-50 pb-4 mb-4">
             <div className="p-2 bg-slate-50 text-slate-600 rounded-lg">
               <ShieldCheck size={20} />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-gray-800">
-                Keamanan Anti-Titip Absen
-              </h3>
-              <p className="text-sm text-gray-500">
-                Kunci 1 Akun Guru hanya untuk 1 Perangkat HP saja.
-              </p>
+              <h3 className="text-lg font-bold text-gray-800">Keamanan</h3>
             </div>
           </div>
-
-          <div className="flex items-center justify-between bg-gray-50 p-4 rounded-2xl border border-gray-100">
+          <div className="flex items-center justify-between bg-gray-50 p-4 rounded-2xl border border-gray-100 h-[104px]">
             <div>
-              <p className="font-bold text-gray-800">
-                Device Binding (Pengikatan Perangkat)
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
-                Jika aktif, guru tidak bisa login dari HP yang berbeda dari saat
-                pertama login.
+              <p className="font-bold text-gray-800">Device Binding</p>
+              <p className="text-[11px] text-gray-500 mt-1 pr-2">
+                Kunci 1 Akun Guru hanya untuk 1 Perangkat HP saja. Mencegah titip absen.
               </p>
             </div>
-
-            <label className="relative inline-flex items-center cursor-pointer">
+            <label className="relative inline-flex items-center cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 className="sr-only peer"
                 checked={formData.enable_device_binding}
                 onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    enable_device_binding: e.target.checked,
-                  })
+                  setFormData({ ...formData, enable_device_binding: e.target.checked })
                 }
               />
-              <div className="w-14 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-emerald-500"></div>
+              <div className="w-12 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-700"></div>
             </label>
           </div>
         </div>
 
-        {/* 5. Hari Libur Sekolah / Nasional */}
+        {/* ======================================= */}
+        {/* BARIS 3: WAKTU ABSENSI (MULTI-SESI)     */}
+        {/* ======================================= */}
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4 md:col-span-2">
+          <div className="flex items-center gap-3 border-b border-gray-50 pb-4 mb-4">
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+              <Clock size={20} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-gray-800">Manajemen Waktu Sesi (Shift)</h3>
+              <p className="text-xs text-gray-500 mt-0.5">Sistem otomatis mendeteksi sesi masuk pegawai berdasarkan jam saat mereka check-in.</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* BLOK SESI 1 (PAGI) */}
+            <div className="p-5 rounded-2xl bg-blue-50/40 border border-blue-100 relative">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="p-1.5 bg-blue-100 text-blue-600 rounded-md">
+                  <Sun size={18} />
+                </div>
+                <h4 className="font-bold text-blue-800">Sesi 1 (Pagi)</h4>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-3">
+                  <p className="text-xs font-bold text-gray-500 uppercase">Jam Datang</p>
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">Mulai Buka</label>
+                    <input
+                      type="time"
+                      value={formData.time_rules.sesi_1.check_in_start}
+                      onChange={(e) => handleSessionTimeChange("sesi_1", "check_in_start", e.target.value)}
+                      className="w-full bg-white border border-blue-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-blue-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">Batas Akhir</label>
+                    <input
+                      type="time"
+                      value={formData.time_rules.sesi_1.check_in_end}
+                      onChange={(e) => handleSessionTimeChange("sesi_1", "check_in_end", e.target.value)}
+                      className="w-full bg-white border border-blue-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-blue-300"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <p className="text-xs font-bold text-gray-500 uppercase">Jam Pulang</p>
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">Mulai Buka</label>
+                    <input
+                      type="time"
+                      value={formData.time_rules.sesi_1.check_out_start}
+                      onChange={(e) => handleSessionTimeChange("sesi_1", "check_out_start", e.target.value)}
+                      className="w-full bg-white border border-blue-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-blue-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">Batas Akhir</label>
+                    <input
+                      type="time"
+                      value={formData.time_rules.sesi_1.check_out_end}
+                      onChange={(e) => handleSessionTimeChange("sesi_1", "check_out_end", e.target.value)}
+                      className="w-full bg-white border border-blue-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-blue-300"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Indikator Terlambat Sesi 1 */}
+              <div className="mt-5 pt-4 border-t border-blue-100">
+                <div className="flex justify-between items-center bg-white/70 p-3 rounded-xl border border-blue-100/50 shadow-sm">
+                  <p className="font-bold text-blue-900 text-sm">Status Terlambat</p>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={formData.time_rules.sesi_1.enable_late_status}
+                      onChange={(e) => handleSessionTimeChange("sesi_1", "enable_late_status", e.target.checked)}
+                    />
+                    <div className="w-10 h-5 bg-blue-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-blue-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+                {formData.time_rules.sesi_1.enable_late_status && (
+                  <div className="mt-3">
+                    <label className="block text-[10px] text-blue-600 font-bold mb-1 uppercase">Batas Mulai Dihitung Terlambat</label>
+                    <input
+                      type="time"
+                      value={formData.time_rules.sesi_1.late_threshold}
+                      onChange={(e) => handleSessionTimeChange("sesi_1", "late_threshold", e.target.value)}
+                      className="w-full bg-blue-100/50 border border-blue-200 text-blue-700 font-bold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-blue-300"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* BLOK SESI 2 (SIANG) */}
+            <div className={`p-5 rounded-2xl border transition-all duration-300 ${formData.time_rules.is_sesi_2_active ? 'bg-orange-50/40 border-orange-100' : 'bg-gray-50 border-gray-200 grayscale opacity-70'}`}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <div className={`p-1.5 rounded-md ${formData.time_rules.is_sesi_2_active ? 'bg-orange-100 text-orange-600' : 'bg-gray-200 text-gray-500'}`}>
+                    <Sunset size={18} />
+                  </div>
+                  <h4 className={`font-bold ${formData.time_rules.is_sesi_2_active ? 'text-orange-800' : 'text-gray-500'}`}>Sesi 2 (Siang)</h4>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="sr-only peer"
+                    checked={formData.time_rules.is_sesi_2_active}
+                    onChange={(e) => setFormData(prev => ({ ...prev, time_rules: { ...prev.time_rules, is_sesi_2_active: e.target.checked } }))}
+                  />
+                  <div className="w-10 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-orange-500"></div>
+                </label>
+              </div>
+
+              <div className={`transition-all duration-300 ${!formData.time_rules.is_sesi_2_active ? 'pointer-events-none' : ''}`}>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-3">
+                    <p className="text-xs font-bold text-gray-500 uppercase">Jam Datang</p>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-1">Mulai Buka</label>
+                      <input
+                        type="time"
+                        value={formData.time_rules.sesi_2.check_in_start}
+                        onChange={(e) => handleSessionTimeChange("sesi_2", "check_in_start", e.target.value)}
+                        className="w-full bg-white border border-orange-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-1">Batas Akhir</label>
+                      <input
+                        type="time"
+                        value={formData.time_rules.sesi_2.check_in_end}
+                        onChange={(e) => handleSessionTimeChange("sesi_2", "check_in_end", e.target.value)}
+                        className="w-full bg-white border border-orange-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-300"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <p className="text-xs font-bold text-gray-500 uppercase">Jam Pulang</p>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-1">Mulai Buka</label>
+                      <input
+                        type="time"
+                        value={formData.time_rules.sesi_2.check_out_start}
+                        onChange={(e) => handleSessionTimeChange("sesi_2", "check_out_start", e.target.value)}
+                        className="w-full bg-white border border-orange-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-1">Batas Akhir</label>
+                      <input
+                        type="time"
+                        value={formData.time_rules.sesi_2.check_out_end}
+                        onChange={(e) => handleSessionTimeChange("sesi_2", "check_out_end", e.target.value)}
+                        className="w-full bg-white border border-orange-200 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-300"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Indikator Terlambat Sesi 2 */}
+                <div className="mt-5 pt-4 border-t border-orange-100">
+                  <div className="flex justify-between items-center bg-white/70 p-3 rounded-xl border border-orange-100/50 shadow-sm">
+                    <p className="font-bold text-orange-900 text-sm">Status Terlambat</p>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="sr-only peer"
+                        checked={formData.time_rules.sesi_2.enable_late_status}
+                        onChange={(e) => handleSessionTimeChange("sesi_2", "enable_late_status", e.target.checked)}
+                      />
+                      <div className="w-10 h-5 bg-orange-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-orange-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-orange-500"></div>
+                    </label>
+                  </div>
+                  {formData.time_rules.sesi_2.enable_late_status && (
+                    <div className="mt-3">
+                      <label className="block text-[10px] text-orange-600 font-bold mb-1 uppercase">Batas Mulai Dihitung Terlambat</label>
+                      <input
+                        type="time"
+                        value={formData.time_rules.sesi_2.late_threshold}
+                        onChange={(e) => handleSessionTimeChange("sesi_2", "late_threshold", e.target.value)}
+                        className="w-full bg-orange-100/50 border border-orange-200 text-orange-700 font-bold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-orange-300"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ======================================= */}
+        {/* BARIS 4: HARI LIBUR NASIONAL            */}
+        {/* ======================================= */}
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4 md:col-span-2">
           <div className="flex items-center gap-3 border-b border-gray-50 pb-4 mb-4">
             <div className="p-2 bg-orange-50 text-orange-600 rounded-lg">
               <CalendarOff size={20} />
             </div>
-            <h3 className="text-lg font-bold text-gray-800">
-              Hari Libur Sekolah / Nasional
-            </h3>
+            <div>
+              <h3 className="text-lg font-bold text-gray-800">Hari Libur Sekolah / Nasional</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Tanggal yang ditambahkan ke sini tidak akan dihitung sebagai kewajiban hadir (tidak mengurangi persentase kehadiran).
+              </p>
+            </div>
           </div>
-          <p className="text-sm text-gray-500 mb-4">
-            Tanggal yang ditambahkan ke sini tidak akan dihitung sebagai
-            kewajiban hadir (tidak mengurangi persentase kehadiran).
-          </p>
 
           <div className="flex flex-col md:flex-row gap-3">
             <input
               type="date"
               value={holidayInput.date}
-              onChange={(e) =>
-                setHolidayInput({ ...holidayInput, date: e.target.value })
-              }
+              onChange={(e) => setHolidayInput({ ...holidayInput, date: e.target.value })}
               className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/20 md:w-1/4"
             />
             <input
               type="text"
               placeholder="Keterangan (Cth: HUT RI ke-81)"
               value={holidayInput.description}
-              onChange={(e) =>
-                setHolidayInput({
-                  ...holidayInput,
-                  description: e.target.value,
-                })
-              }
+              onChange={(e) => setHolidayInput({ ...holidayInput, description: e.target.value })}
               className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-primary/20"
             />
             <button
@@ -579,9 +661,7 @@ export default function AdminSetting() {
                       </div>
                       <div>
                         <p className="text-sm font-bold text-gray-800">
-                          {format(new Date(holiday.date), "dd MMM yyyy", {
-                            locale: id,
-                          })}
+                          {format(new Date(holiday.date), "dd MMM yyyy", { locale: id })}
                         </p>
                         <p className="text-xs text-gray-500 font-medium line-clamp-1">
                           {holiday.description}

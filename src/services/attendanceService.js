@@ -65,7 +65,7 @@ export const attendanceService = {
     }
   },
 
-  // 2. Proses Absen Datang (DIPERBARUI: DETEKSI TERLAMBAT)
+  // 2. Proses Absen Datang (DIPERBARUI: DETEKSI TERLAMBAT MULTI-SESI)
   checkIn: async (
     userId,
     schoolId,
@@ -84,19 +84,43 @@ export const attendanceService = {
 
       const absoluteDateObj = new Date(finalTimeStr);
       const trueDateStr = format(absoluteDateObj, "yyyy-MM-dd");
-      const currentTimeStr = format(absoluteDateObj, "HH:mm"); // Format HH:mm (cth: 07:16)
+      const currentTimeStr = format(absoluteDateObj, "HH:mm"); // Format HH:mm (cth: 07:16, 13:45)
 
       // ==========================================
-      // LOGIKA PENGECEKAN BATAS TERLAMBAT
+      // LOGIKA PENGECEKAN BATAS TERLAMBAT MULTI-SESI
       // ==========================================
       let isLate = false;
+      let activeSessionName = "Sesi 1";
+
       try {
         const schoolSnap = await getDoc(doc(db, "schools", schoolId));
         if (schoolSnap.exists()) {
           const sData = schoolSnap.data();
-          if (sData.enable_late_status && sData.time_rules?.late_threshold) {
-            // Bandingkan string waktu (cth: "07:16" > "07:15" -> true)
-            if (currentTimeStr > sData.time_rules.late_threshold) {
+          const timeRules = sData.time_rules;
+
+          if (timeRules && timeRules.sesi_1) {
+            // STRUKTUR BARU (Multi-Sesi)
+            let activeSession = timeRules.sesi_1;
+
+            // Jika Sesi 2 aktif, dan jam absen masuk ke dalam jam mulai Sesi 2 atau lebih
+            if (
+              timeRules.is_sesi_2_active &&
+              timeRules.sesi_2 &&
+              currentTimeStr >= timeRules.sesi_2.check_in_start
+            ) {
+              activeSession = timeRules.sesi_2;
+              activeSessionName = "Sesi 2";
+            }
+
+            // Tentukan status terlambat berdasarkan Sesi yang aktif
+            if (activeSession.enable_late_status && activeSession.late_threshold) {
+              if (currentTimeStr > activeSession.late_threshold) {
+                isLate = true;
+              }
+            }
+          } else if (sData.enable_late_status && timeRules?.late_threshold) {
+            // STRUKTUR LAMA (Fallback jika belum migrasi)
+            if (currentTimeStr > timeRules.late_threshold) {
               isLate = true;
             }
           }
@@ -118,9 +142,10 @@ export const attendanceService = {
           longitude,
           distance_meters: distance,
           device_info: navigator.userAgent,
-          is_late: isLate, // Penanda terlambat di objek check_in
+          is_late: isLate,
+          session_detected: activeSessionName, // Info tambahan, Sesi berapa dia di-detect
         },
-        is_late: isLate, // Penanda terlambat di root dokumen (untuk mempermudah filter rekap)
+        is_late: isLate, 
         check_out: null,
         total_hours: 0,
         status: "Belum Pulang",
@@ -224,14 +249,14 @@ export const attendanceService = {
   },
 
   // ==========================================
-  // 5. SINKRONISASI OFFLINE BATCH (DIPERBARUI)
+  // 5. SINKRONISASI OFFLINE BATCH (DIPERBARUI: MULTI-SESI)
   // ==========================================
   syncOfflineBatch: async (queueData) => {
     if (!queueData || queueData.length === 0) return true;
 
     try {
       const batch = writeBatch(db);
-      const schoolCache = {}; // Cache agar tidak menarik data sekolah yang sama berulang kali
+      const schoolCache = {}; // Cache agar tidak menarik data sekolah berulang
 
       // Gunakan for...of karena ada proses await di dalamnya
       for (const data of queueData) {
@@ -249,11 +274,34 @@ export const attendanceService = {
             schoolCache[data.school_id] = sSnap.exists() ? sSnap.data() : null;
           }
           const sData = schoolCache[data.school_id];
+          
           let isLate = false;
+          let activeSessionName = "Sesi 1";
 
-          if (sData?.enable_late_status && sData?.time_rules?.late_threshold) {
-            if (currentTimeStr > sData.time_rules.late_threshold) {
-              isLate = true;
+          if (sData) {
+            const timeRules = sData.time_rules;
+            if (timeRules && timeRules.sesi_1) {
+              let activeSession = timeRules.sesi_1;
+
+              // Deteksi Sesi 2 Offline Sync
+              if (
+                timeRules.is_sesi_2_active &&
+                timeRules.sesi_2 &&
+                currentTimeStr >= timeRules.sesi_2.check_in_start
+              ) {
+                activeSession = timeRules.sesi_2;
+                activeSessionName = "Sesi 2";
+              }
+
+              if (activeSession.enable_late_status && activeSession.late_threshold) {
+                if (currentTimeStr > activeSession.late_threshold) {
+                  isLate = true;
+                }
+              }
+            } else if (sData.enable_late_status && timeRules?.late_threshold) {
+              if (currentTimeStr > timeRules.late_threshold) {
+                isLate = true;
+              }
             }
           }
 
@@ -270,6 +318,7 @@ export const attendanceService = {
                 distance_meters: data.distance,
                 device_info: "Offline-Sync",
                 is_late: isLate,
+                session_detected: activeSessionName,
               },
               is_late: isLate,
               check_out: null,
