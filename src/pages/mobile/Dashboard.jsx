@@ -329,23 +329,46 @@ export default function Dashboard() {
   const isWorkingDay = workingDaysDef.includes(todayDayOfWeek) && !isHoliday;
 
   const currentHM = format(currentTime, "HH:mm");
-  const timeRules = schoolData?.time_rules || {
+  
+  // ==========================================
+  // DETEKSI SESI AKTIF (MULTI-SHIFT LOGIC)
+  // ==========================================
+  const rawTimeRules = schoolData?.time_rules || {};
+  let activeSession = rawTimeRules.sesi_1 || {
     check_in_start: "06:00",
     check_in_end: "07:30",
     check_out_start: "15:00",
     check_out_end: "18:00",
   };
+  let sessionName = "Sesi 1";
+
+  // Jika Sesi 2 aktif, cek apakah saatnya menggunakan Sesi 2
+  if (rawTimeRules.is_sesi_2_active && rawTimeRules.sesi_2) {
+    // 1. Jika sudah absen masuk, ikuti sesi saat dia absen
+    if (todayAtt?.check_in?.session_detected === "Sesi 2") {
+      activeSession = rawTimeRules.sesi_2;
+      sessionName = "Sesi 2";
+    } 
+    // 2. Jika belum absen, ganti tampilan ke Sesi 2 jika jam sekarang melebihi waktu buka Sesi 2
+    else if (!todayAtt?.check_in && currentHM >= rawTimeRules.sesi_2.check_in_start) {
+      activeSession = rawTimeRules.sesi_2;
+      sessionName = "Sesi 2";
+    }
+  } else if (!rawTimeRules.sesi_1 && rawTimeRules.check_in_start) {
+    // Fallback untuk struktur data lama (sebelum migrasi)
+    activeSession = rawTimeRules;
+  }
 
   const isCheckInTimeValid =
-    currentHM >= timeRules.check_in_start &&
-    currentHM <= timeRules.check_in_end;
+    currentHM >= activeSession.check_in_start &&
+    currentHM <= activeSession.check_in_end;
   const isCheckOutTimeValid =
-    currentHM >= timeRules.check_out_start &&
-    currentHM <= timeRules.check_out_end;
+    currentHM >= activeSession.check_out_start &&
+    currentHM <= activeSession.check_out_end;
 
   const isDatangTutup =
-    currentHM > timeRules.check_in_end || currentHM > timeRules.check_out_end;
-  const isPulangTutup = currentHM > timeRules.check_out_end;
+    currentHM > activeSession.check_in_end || currentHM > activeSession.check_out_end;
+  const isPulangTutup = currentHM > activeSession.check_out_end;
 
   const targetMinutes = 8 * 60;
   let workedMinutes = 0;
@@ -538,7 +561,8 @@ export default function Dashboard() {
           <div className="flex flex-col gap-2">
             <div className="text-center">
               <span className="bg-emerald-200/90 backdrop-blur-sm text-gray-800 text-[10px] font-medium px-3 py-1 rounded-full shadow-sm border border-white">
-                {timeRules.check_in_start} - {timeRules.check_in_end}
+                {rawTimeRules?.is_sesi_2_active ? `${sessionName}: ` : ""}
+                {activeSession.check_in_start} - {activeSession.check_in_end}
               </span>
             </div>
             <div className="bg-white/95 backdrop-blur-sm rounded-[1.5rem] shadow-sm border border-gray-100 p-4 flex flex-col items-center justify-center opacity-[0.8]">
@@ -565,7 +589,7 @@ export default function Dashboard() {
                     "--:--"
                   )}
                 </p>
-                {/* LABEL TERLAMBAT (BARU) */}
+                {/* LABEL TERLAMBAT */}
                 {todayAtt?.is_late && !isAutoInject && (
                   <span className="text-[10px] font-bold text-orange-500 mt-0.5">
                     Terlambat
@@ -578,7 +602,8 @@ export default function Dashboard() {
           <div className="flex flex-col gap-2">
             <div className="text-center">
               <span className="bg-red-300/90 backdrop-blur-sm text-gray-800 text-[10px] font-medium px-3 py-1 rounded-full shadow-sm border border-white">
-                {timeRules.check_out_start} - {timeRules.check_out_end}
+                {rawTimeRules?.is_sesi_2_active ? `${sessionName}: ` : ""}
+                {activeSession.check_out_start} - {activeSession.check_out_end}
               </span>
             </div>
             <div className="bg-white/95 backdrop-blur-sm rounded-[1.5rem] shadow-sm border border-gray-100 p-4 flex flex-col items-center justify-center opacity-[0.8]">
@@ -916,7 +941,7 @@ export default function Dashboard() {
                 {successModal.time}
               </p>
               {/* ======================================= */}
-              {/* LABEL TERLAMBAT PADA SUCCESS MODAL       */}
+              {/* LABEL TERLAMBAT PADA SUCCESS MODAL      */}
               {/* ======================================= */}
               {successModal.type === "datang" && todayAtt?.is_late && !isAutoInject && (
                 <span className="mt-1 text-[10px] font-bold px-2 py-0.5 bg-orange-100 text-orange-600 rounded-md border border-orange-200 animate-pulse">
