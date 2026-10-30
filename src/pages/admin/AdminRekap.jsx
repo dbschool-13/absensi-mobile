@@ -103,11 +103,22 @@ export default function AdminRekap() {
     );
   }, [selectedMonth, selectedYear, activeWorkingDaysDef, holidaysDef]);
 
+  // Modifikasi perhitungan total hari kerja khusus untuk Strict Month
   const totalHariKerjaBulanIni = useMemo(() => {
     let total = 0;
-    availableWeeks.forEach((week) => (total += week.dates.length));
+    const targetPrefix = `${selectedYear}-${selectedMonth}`;
+    
+    availableWeeks.forEach((week) => {
+      week.dates.forEach((dateObj) => {
+        const dateStr = format(dateObj, "yyyy-MM");
+        // Hanya hitung hari jika bulannya cocok
+        if (dateStr === targetPrefix) {
+          total++;
+        }
+      });
+    });
     return total;
-  }, [availableWeeks]);
+  }, [availableWeeks, selectedMonth, selectedYear]);
 
   useEffect(() => {
     setSelectedWeek("all");
@@ -157,6 +168,7 @@ export default function AdminRekap() {
         selectedWeek === "all"
           ? null
           : availableWeeks.find((w) => w.id === parseInt(selectedWeek));
+      
       const hariKerjaAktif = targetWeek
         ? targetWeek.dates.length
         : totalHariKerjaBulanIni;
@@ -170,18 +182,35 @@ export default function AdminRekap() {
         ),
       );
 
+      // Variabel untuk Strict Month Filter
+      const targetMonthPrefix = `${selectedYear}-${selectedMonth}`;
+
       filteredTeachers.forEach((guru) => {
         const absensiGuru = attendances.filter(
           (att) => att.user_id === guru.nip,
         );
 
-        const absensiAktif = targetWeek
-          ? absensiGuru.filter((att) =>
-              targetWeek.dates.some(
-                (d) => format(d, "yyyy-MM-dd") === att.date,
-              ),
-            )
-          : absensiGuru.filter((att) => allValidDates.has(att.date));
+        let absensiAktif = [];
+        
+        if (targetWeek) {
+          // Jika milih per Minggu, biarkan lintas bulan (tidak di-strict)
+          absensiAktif = absensiGuru.filter((att) =>
+            targetWeek.dates.some(
+              (d) => format(d, "yyyy-MM-dd") === att.date,
+            ),
+          );
+        } else {
+          // ==========================================
+          // PERBAIKAN: STRICT MONTH FILTER DITERAPKAN DI SINI
+          // ==========================================
+          absensiAktif = absensiGuru.filter((att) => {
+            // Ambil "YYYY-MM" dari "YYYY-MM-DD"
+            const attMonthPrefix = att.date.substring(0, 7); 
+            // Cek apakah tanggal valid (ada di dalam array availableWeeks) DAN 
+            // cocok dengan bulan yang sedang diekspor.
+            return allValidDates.has(att.date) && attMonthPrefix === targetMonthPrefix;
+          });
+        }
 
         let countHadir = 0;
         let countIzin = 0;
@@ -269,6 +298,8 @@ export default function AdminRekap() {
     selectedWeek,
     availableWeeks,
     totalHariKerjaBulanIni,
+    selectedMonth, // Ditambahkan sebagai dependency
+    selectedYear   // Ditambahkan sebagai dependency
   ]);
 
   // Fungsi utilitas untuk mendapatkan data Kepsek

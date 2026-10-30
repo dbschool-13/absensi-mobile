@@ -87,7 +87,7 @@ export default function Riwayat() {
   const [selectedMonth, setSelectedMonth] = useState(format(currentDate, "MM"));
   const [selectedYear, setSelectedYear] = useState(format(currentDate, "yyyy"));
 
-  const [history, setHistory] = useState([]);
+  const [rawHistory, setRawHistory] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const months = [
@@ -120,11 +120,21 @@ export default function Riwayat() {
     );
   }, [selectedMonth, selectedYear, activeWorkingDaysDef, holidaysDef]);
 
+  // Modifikasi Total Hari Kerja agar Strict Month
   const totalHariKerjaBulanIni = useMemo(() => {
     let total = 0;
-    availableWeeks.forEach((week) => (total += week.dates.length));
+    const targetPrefix = `${selectedYear}-${selectedMonth}`;
+    
+    availableWeeks.forEach((week) => {
+      week.dates.forEach((dateObj) => {
+        const dateStr = format(dateObj, "yyyy-MM");
+        if (dateStr === targetPrefix) {
+          total++;
+        }
+      });
+    });
     return total;
-  }, [availableWeeks]);
+  }, [availableWeeks, selectedMonth, selectedYear]);
 
   // ============================================================
   // FETCH DATA: PARALLEL LINTAS BULAN UNTUK KALKULASI REKAP
@@ -160,28 +170,71 @@ export default function Riwayat() {
           ),
         );
 
-        const absensiAktif = uniqueAttendances.filter((att) =>
-          allValidDates.has(att.date),
-        );
+        const targetMonthPrefix = `${selectedYear}-${selectedMonth}`;
+        
+        const absensiAktif = uniqueAttendances.filter((att) => {
+          const attMonthPrefix = att.date.substring(0, 7);
+          return allValidDates.has(att.date) && attMonthPrefix === targetMonthPrefix;
+        });
 
-        absensiAktif.sort((a, b) => b.date.localeCompare(a.date));
-
-        setHistory(absensiAktif);
+        setRawHistory(absensiAktif);
         setLoading(false);
       }
     };
 
     fetchHistory();
-  }, [user, availableWeeks]);
+  }, [user, availableWeeks, selectedMonth, selectedYear]);
 
   // ============================================================
-  // KALKULASI METRIK
+  // INJEKSI HARI KOSONG (ALPA)
+  // ============================================================
+  const historyWithAlpa = useMemo(() => {
+    const combinedData = [];
+    const targetPrefix = `${selectedYear}-${selectedMonth}`;
+    
+    // Ambil semua hari efektif yang berada di bulan yang sedang dipilih
+    const validDatesForSelectedMonth = availableWeeks
+      .flatMap((w) => w.dates)
+      .filter((d) => format(d, "yyyy-MM") === targetPrefix);
+
+    validDatesForSelectedMonth.forEach((dateObj) => {
+      const dateStr = format(dateObj, "yyyy-MM-dd");
+      // Cari apakah ada absen di hari itu
+      const existingAtt = rawHistory.find((att) => att.date === dateStr);
+
+      if (existingAtt) {
+        // Jika ada absen (termasuk Izin), masukkan apa adanya
+        combinedData.push(existingAtt);
+      } else {
+        // Jika TIDAK ADA absen sama sekali dan hari ini sudah terlewat (atau hari ini sedang berlangsung)
+        // Maka kita buat objek absen palsu bertipe ALPA
+        if (dateObj.getTime() <= new Date().getTime()) {
+          combinedData.push({
+            id: `alpa_${dateStr}`,
+            date: dateStr,
+            is_alpa: true, // Penanda khusus
+            status: "Alpa / Tanpa Keterangan",
+            total_hours: 0,
+            check_in: null,
+            check_out: null,
+          });
+        }
+      }
+    });
+
+    // Urutkan kembali berdasarkan tanggal dari yang terbaru
+    return combinedData.sort((a, b) => b.date.localeCompare(a.date));
+  }, [rawHistory, availableWeeks, selectedMonth, selectedYear]);
+
+
+  // ============================================================
+  // KALKULASI METRIK (BERDASARKAN DATA ASLI rawHistory SAJA)
   // ============================================================
   const summary = useMemo(() => {
     let countHadir = 0;
     let totalJamKerjaRaw = 0;
 
-    history.forEach((att) => {
+    rawHistory.forEach((att) => {
       const isAutoInject =
         att.is_auto_injected === true || att.check_in?.time === "[AUTO-INJECT]";
 
@@ -219,15 +272,8 @@ export default function Riwayat() {
       persentaseKehadiran,
       persentaseKinerja,
     };
-  }, [history, totalHariKerjaBulanIni]);
+  }, [rawHistory, totalHariKerjaBulanIni]);
 
-  // ============================================================
-  // FILTER VISUAL
-  // ============================================================
-  const displayHistory = useMemo(() => {
-    const targetPrefix = `${selectedYear}-${selectedMonth}`;
-    return history.filter((item) => item.date.startsWith(targetPrefix));
-  }, [history, selectedMonth, selectedYear]);
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24 font-sans">
@@ -331,7 +377,7 @@ export default function Riwayat() {
               </div>
             </div>
           ))
-        ) : displayHistory.length === 0 ? (
+        ) : historyWithAlpa.length === 0 ? (
           <div className="text-center py-12">
             <div className="w-20 h-20 bg-gray-200/50 rounded-full flex items-center justify-center mx-auto mb-4">
               <Calendar size={32} className="text-gray-400" />
@@ -342,9 +388,42 @@ export default function Riwayat() {
             </p>
           </div>
         ) : (
-          displayHistory.map((item) => {
+          historyWithAlpa.map((item) => {
             const dateObj = parseISO(item.date);
 
+            // Jika ini adalah baris Alpa (injeksi data buatan)
+            if (item.is_alpa) {
+              return (
+                <div
+                  key={item.id}
+                  className="bg-white rounded-2xl p-4 shadow-sm border border-red-100 flex flex-col gap-4 relative overflow-hidden"
+                >
+                  <div className="absolute top-0 left-0 w-1 h-full bg-red-400"></div>
+                  <div className="flex justify-between items-center border-b border-gray-50 pb-2 pl-2">
+                    <div className="flex flex-col">
+                      <span className="text-xs text-gray-400 uppercase font-bold tracking-wider">
+                        {format(dateObj, "EEEE", { locale: id })}
+                      </span>
+                      <span className="font-semibold text-gray-800">
+                        {format(dateObj, "dd MMM yyyy", { locale: id })}
+                      </span>
+                    </div>
+
+                    <div className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-red-50 text-red-600 border-red-200">
+                      Alpa
+                    </div>
+                  </div>
+                  <div className="pl-2">
+                    <p className="text-sm font-semibold text-gray-500 flex items-center gap-2">
+                       <AlertCircle size={14} className="text-red-400"/>
+                       Tidak ada catatan kehadiran.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+
+            // Jika baris normal
             const isAutoInject =
               item.is_auto_injected === true ||
               item.check_in?.time === "[AUTO-INJECT]";
@@ -417,9 +496,12 @@ export default function Riwayat() {
             return (
               <div
                 key={item.id}
-                className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col gap-4"
+                className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col gap-4 relative overflow-hidden"
               >
-                <div className="flex justify-between items-center border-b border-gray-50 pb-2">
+                {/* Aksen pinggir opsional */}
+                <div className="absolute top-0 left-0 w-1 h-full bg-indigo-500 opacity-20"></div>
+
+                <div className="flex justify-between items-center border-b border-gray-50 pb-2 pl-2">
                   <div className="flex flex-col">
                     <span className="text-xs text-gray-400 uppercase font-bold tracking-wider">
                       {format(dateObj, "EEEE", { locale: id })}
@@ -436,7 +518,7 @@ export default function Riwayat() {
                   </div>
                 </div>
 
-                <div className="flex justify-between items-start">
+                <div className="flex justify-between items-start pl-2">
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center border border-emerald-100 mt-1">
                       <Clock size={16} className="text-emerald-500" />
@@ -448,9 +530,6 @@ export default function Riwayat() {
                       <p className="font-bold text-gray-800">
                         {formatTimeSafe(item.check_in?.time, badgeLabel)}
                       </p>
-                      {/* ======================================= */}
-                      {/* LABEL TERLAMBAT (BARU) */}
-                      {/* ======================================= */}
                       {item.is_late && !isAutoInject && (
                         <p className="text-[10px] font-bold text-orange-500 mt-0.5">
                           Terlambat
@@ -475,7 +554,7 @@ export default function Riwayat() {
                 </div>
 
                 {item.check_out && (
-                  <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1 mt-1 border border-gray-100">
+                  <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-1 mt-1 border border-gray-100 ml-2">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-2 text-gray-600">
                         <Target size={14} />

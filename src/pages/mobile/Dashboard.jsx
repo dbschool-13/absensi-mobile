@@ -3,7 +3,7 @@ import {
   syncServerTime,
   checkTimeTampering,
 } from "../../utils/secureTime";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useGeolocation } from "../../hooks/useGeolocation";
 import { calculateDistance } from "../../utils/distanceCalculator";
@@ -74,10 +74,11 @@ export default function Dashboard() {
   const currentTime = getSecureTime();
   const [todayAtt, setTodayAtt] = useState(null);
 
-  // --- STATE OFFLINE MODE ---
+  // --- STATE OFFLINE & TOTAL JAM ---
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [pendingSync, setPendingSync] = useState(0);
   const [weeklyTotalPastDays, setWeeklyTotalPastDays] = useState(0);
+  const [monthlyTotalPastDays, setMonthlyTotalPastDays] = useState(0); // BARU
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState(null);
@@ -89,6 +90,33 @@ export default function Dashboard() {
     type: "",
     time: "",
   });
+
+  // ==========================================
+  // KALKULASI TARGET BULANAN SECARA DINAMIS
+  // ==========================================
+  const targetMonthlyHours = useMemo(() => {
+    if (!schoolData) return 0;
+    const workingDaysDef = schoolData.working_days || [1, 2, 3, 4, 5];
+    const holidaysDef = schoolData.holidays || [];
+    
+    const year = currentTime.getFullYear();
+    const month = currentTime.getMonth();
+    const endOfMonthDate = new Date(year, month + 1, 0);
+
+    let workingDaysCount = 0;
+    for (let d = 1; d <= endOfMonthDate.getDate(); d++) {
+      const tempDate = new Date(year, month, d);
+      const dayOfWeek = tempDate.getDay();
+      const dateStr = format(tempDate, "yyyy-MM-dd");
+      const isHoliday = holidaysDef.some((h) => h.date === dateStr);
+      
+      if (workingDaysDef.includes(dayOfWeek) && !isHoliday) {
+        workingDaysCount++;
+      }
+    }
+    return workingDaysCount * 8; // 8 jam per hari
+  }, [schoolData, currentTime]);
+
 
   useEffect(() => {
     const fetchTodayAtt = async () => {
@@ -104,40 +132,61 @@ export default function Dashboard() {
     fetchTodayAtt();
   }, [user]);
 
+  // ==========================================
+  // FETCH DATA BULANAN & MINGGUAN (DIGABUNG AGAR HEMAT)
+  // ==========================================
   useEffect(() => {
-    const fetchWeeklyData = async () => {
+    const fetchProgressData = async () => {
       if (!user || isOffline) return;
       try {
+        const year = currentTime.getFullYear();
+        const month = currentTime.getMonth();
+        
+        // Rentang 1 bulan penuh
+        const startOfMonthDate = new Date(year, month, 1);
+        const endOfMonthDate = new Date(year, month + 1, 0);
+        const startMonthStr = format(startOfMonthDate, "yyyy-MM-dd");
+        const endMonthStr = format(endOfMonthDate, "yyyy-MM-dd");
+
+        // Rentang Minggu Ini
         const startOfWk = startOfWeek(currentTime, { weekStartsOn: 1 });
         const endOfWk = endOfWeek(currentTime, { weekStartsOn: 1 });
-        const todayStr = format(currentTime, "yyyy-MM-dd");
+        const startWkStr = format(startOfWk, "yyyy-MM-dd");
+        const endWkStr = format(endOfWk, "yyyy-MM-dd");
 
-        const startStr = format(startOfWk, "yyyy-MM-dd");
-        const endStr = format(endOfWk, "yyyy-MM-dd");
+        const todayStr = format(currentTime, "yyyy-MM-dd");
 
         const q = query(
           collection(db, `schools/${user.school_id}/attendances`),
           where("user_id", "==", user.nip),
-          where("date", ">=", startStr),
-          where("date", "<=", endStr),
+          where("date", ">=", startMonthStr),
+          where("date", "<=", endMonthStr),
         );
 
         const snap = await getDocs(q);
-        let pastTotal = 0;
+        let pastTotalMonth = 0;
+        let pastTotalWeek = 0;
 
         snap.forEach((doc) => {
           const data = doc.data();
           if (data.date !== todayStr) {
             const hours = parseFloat(data.total_hours) || 0;
-            pastTotal += hours;
+            pastTotalMonth += hours;
+
+            // Jika data tersebut juga berada dalam minggu ini
+            if (data.date >= startWkStr && data.date <= endWkStr) {
+              pastTotalWeek += hours;
+            }
           }
         });
-        setWeeklyTotalPastDays(pastTotal);
+
+        setWeeklyTotalPastDays(pastTotalWeek);
+        setMonthlyTotalPastDays(pastTotalMonth);
       } catch (error) {
-        console.error("Gagal menarik data mingguan:", error);
+        console.error("Gagal menarik data target:", error);
       }
     };
-    fetchWeeklyData();
+    fetchProgressData();
   }, [user, isOffline]);
 
   useEffect(() => {
@@ -342,20 +391,16 @@ export default function Dashboard() {
   };
   let sessionName = "Sesi 1";
 
-  // Jika Sesi 2 aktif, cek apakah saatnya menggunakan Sesi 2
   if (rawTimeRules.is_sesi_2_active && rawTimeRules.sesi_2) {
-    // 1. Jika sudah absen masuk, ikuti sesi saat dia absen
     if (todayAtt?.check_in?.session_detected === "Sesi 2") {
       activeSession = rawTimeRules.sesi_2;
       sessionName = "Sesi 2";
     } 
-    // 2. Jika belum absen, ganti tampilan ke Sesi 2 jika jam sekarang melebihi waktu buka Sesi 2
     else if (!todayAtt?.check_in && currentHM >= rawTimeRules.sesi_2.check_in_start) {
       activeSession = rawTimeRules.sesi_2;
       sessionName = "Sesi 2";
     }
   } else if (!rawTimeRules.sesi_1 && rawTimeRules.check_in_start) {
-    // Fallback untuk struktur data lama (sebelum migrasi)
     activeSession = rawTimeRules;
   }
 
@@ -401,14 +446,11 @@ export default function Dashboard() {
   if (shortHours > 0) shortText += `${shortHours}j `;
   shortText += `${shortMins}m`;
 
+  // --- PROGRESS MINGGUAN ---
   const targetWeeklyHours = workingDaysDef.length * 8;
   const targetWeeklyMinutes = targetWeeklyHours * 60;
-  const totalWeeklyMinutesSoFar =
-    weeklyTotalPastDays * 60 + Math.max(workedMinutes, 0);
-  const weeklyDeficitMinutes = Math.max(
-    targetWeeklyMinutes - totalWeeklyMinutesSoFar,
-    0,
-  );
+  const totalWeeklyMinutesSoFar = weeklyTotalPastDays * 60 + Math.max(workedMinutes, 0);
+  const weeklyDeficitMinutes = Math.max(targetWeeklyMinutes - totalWeeklyMinutesSoFar, 0);
   const deficitHours = Math.floor(weeklyDeficitMinutes / 60);
   const deficitMins = Math.floor(weeklyDeficitMinutes % 60);
 
@@ -416,6 +458,19 @@ export default function Dashboard() {
   if (weeklyDeficitMinutes > 0) {
     weeklyBadgeText = `Kurang ${deficitHours}j ${deficitMins}m`;
   }
+
+  // --- PROGRESS BULANAN ---
+  const targetMonthlyMinutes = targetMonthlyHours * 60;
+  const totalMonthlyMinutesSoFar = monthlyTotalPastDays * 60 + Math.max(workedMinutes, 0);
+  const monthlyDeficitMinutes = Math.max(targetMonthlyMinutes - totalMonthlyMinutesSoFar, 0);
+  const monthlyDefHours = Math.floor(monthlyDeficitMinutes / 60);
+  const monthlyDefMins = Math.floor(monthlyDeficitMinutes % 60);
+
+  let monthlyBadgeText = "Tercapai";
+  if (monthlyDeficitMinutes > 0) {
+    monthlyBadgeText = `Kurang ${monthlyDefHours}j ${monthlyDefMins}m`;
+  }
+
 
   const getGreeting = () => {
     const hour = currentTime.getHours();
@@ -707,6 +762,22 @@ export default function Dashboard() {
               }`}
             >
               {weeklyBadgeText}
+            </span>
+          </div>
+
+          {/* TARGET BULANAN BARU */}
+          <div className="pt-2 border-t border-gray-50 flex items-center justify-between">
+            <span className="text-[10px] font-medium text-gray-400">
+              Bulanan ({targetMonthlyHours} Jam)
+            </span>
+            <span
+              className={`text-[9px] font-semibold px-2 py-0.5 rounded transition-colors ${
+                monthlyDeficitMinutes <= 0
+                  ? "bg-emerald-50 text-emerald-600"
+                  : "bg-blue-50 text-blue-600"
+              }`}
+            >
+              {monthlyBadgeText}
             </span>
           </div>
         </div>

@@ -100,10 +100,11 @@ export const checkTimeTampering = () => {
 if (typeof window !== "undefined") {
   let lastTick = Date.now();
   let lastPerf = performance.now();
+  let driftSuspended = false; // Penanda Jeda (Self-Healing)
 
   const checkDrift = () => {
-    // ABAIKAN pengecekan selama 5 detik pertama setelah aplikasi dimuat (Cold Start Protection)
-    if (Date.now() - appLoadTime < 5000) return;
+    // ABAIKAN pengecekan selama 5 detik pertama (Cold Start) atau saat tersuspend
+    if (Date.now() - appLoadTime < 5000 || driftSuspended) return;
 
     const currentTick = Date.now();
     const currentPerf = performance.now();
@@ -111,8 +112,24 @@ if (typeof window !== "undefined") {
     const tickDelta = currentTick - lastTick;
     const perfDelta = currentPerf - lastPerf;
 
-    // Batas toleransi dinaikkan dari 3 detik ke 8 detik untuk mencegah false positive
-    if (Math.abs(tickDelta - perfDelta) > 8000) {
+    // Jika lompatan > 10 detik, ASUMSIKAN HP BARU BANGUN DARI SLEEP, BUKAN MANIPULASI.
+    // Lakukan reset diam-diam, lalu paksa sync jika online.
+    if (Math.abs(tickDelta - perfDelta) > 10000) {
+       lastTick = Date.now();
+       lastPerf = performance.now();
+       
+       if (navigator.onLine) {
+           driftSuspended = true; // Hentikan sensor sementara
+           syncServerTime().finally(() => {
+               driftSuspended = false; // Aktifkan lagi setelah API merespons
+           });
+       }
+       return; // Keluar dari fungsi, jangan vonis 'true'
+    }
+
+    // Vonis 'manipulasi' hanya jika loncatan kecil tapi di atas batas mikro-toleransi (2-8 detik)
+    // yang mengindikasikan user mengubah jam secara manual sambil aplikasi terbuka.
+    if (Math.abs(tickDelta - perfDelta) > 8000 && Math.abs(tickDelta - perfDelta) <= 10000) {
       localStorage.setItem("is_time_manipulated", "true");
       serverValidated = false;
 
@@ -127,11 +144,16 @@ if (typeof window !== "undefined") {
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
-      // Reset acuan waktu saat aplikasi dibuka kembali dari background untuk cegah loncatan palsu
+      // Reset acuan waktu saat aplikasi dibuka kembali dari background
       lastTick = Date.now();
       lastPerf = performance.now();
 
-      if (navigator.onLine) syncServerTime();
+      if (navigator.onLine) {
+          driftSuspended = true;
+          syncServerTime().finally(() => {
+              driftSuspended = false;
+          });
+      }
     }
   });
 
